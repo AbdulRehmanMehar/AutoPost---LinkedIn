@@ -1,0 +1,121 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+import connectToDatabase from '@/lib/mongodb';
+import Post, { PostMode, StructuredInput, MediaItem } from '@/lib/models/Post';
+import User from '@/lib/models/User';
+import { postToLinkedIn } from '@/lib/linkedin';
+
+// GET /api/posts - Get all posts for the current user
+export async function GET() {
+  try {
+    const session = await auth();
+    
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    await connectToDatabase();
+    
+    const user = await User.findOne({ email: session.user.email });
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    const posts = await Post.find({ userId: user._id })
+      .sort({ createdAt: -1 })
+      .lean();
+
+    return NextResponse.json(posts);
+  } catch (error) {
+    console.error('Error fetching posts:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+interface CreatePostBody {
+  mode?: PostMode;
+  content: string;
+  generatedContent?: string;
+  structuredInput?: StructuredInput;
+  aiPrompt?: string;
+  media?: MediaItem[];
+  scheduledFor?: string;
+  publishNow?: boolean;
+}
+
+// POST /api/posts - Create a new post
+export async function POST(request: NextRequest) {
+  try {
+    const session = await auth();
+    
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const body: CreatePostBody = await request.json();
+    const { 
+      mode = 'manual', 
+      content, 
+      generatedContent,
+      structuredInput,
+      aiPrompt,
+      media = [],
+      scheduledFor, 
+      publishNow 
+    } = body;
+
+    if (!content || content.trim().length === 0) {
+      return NextResponse.json({ error: 'Content is required' }, { status: 400 });
+    }
+
+    if (content.length > 3000) {
+      return NextResponse.json({ error: 'Content exceeds 3000 characters' }, { status: 400 });
+    }
+
+    await connectToDatabase();
+    
+    const user = await User.findOne({ email: session.user.email });
+    if (!user) {
+      return NextResponse.json({ error: 'User not found' }, { status: 404 });
+    }
+
+    // If publishing now, post directly to LinkedIn
+    if (publishNow) {
+      const result = await postToLinkedIn(session.user.email, content, media);
+      
+      const post = await Post.create({
+        userId: user._id,
+        mode,
+        content,
+        generatedContent,
+        structuredInput,
+        aiPrompt,
+        media,
+        status: result.success ? 'published' : 'failed',
+        publishedAt: result.success ? new Date() : undefined,
+        linkedinPostId: result.postId,
+        error: result.error,
+      });
+
+      return NextResponse.json(post, { status: 201 });
+    }
+
+    // Create scheduled or draft post
+    const post = await Post.create({
+      userId: user._id,
+      mode,
+      content,
+      generatedContent,
+      structuredInput,
+      aiPrompt,
+      media,
+      scheduledFor: scheduledFor ? new Date(scheduledFor) : undefined,
+      status: scheduledFor ? 'scheduled' : 'draft',
+    });
+
+    return NextResponse.json(post, { status: 201 });
+  } catch (error) {
+    console.error('Error creating post:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
