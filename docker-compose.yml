@@ -6,7 +6,7 @@ services:
     container_name: linkedin-auto-poster
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${PORT:-3000}:3000"
     environment:
       - MONGODB_URI=${MONGODB_URI}
       - AUTH_SECRET=${AUTH_SECRET}
