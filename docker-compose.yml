@@ -41,7 +41,9 @@ services:
 
   # Cron scheduler - calls the publish and engagement endpoints
   scheduler:
-    image: alpine:latest
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
     container_name: linkedin-scheduler
     restart: unless-stopped
     depends_on:
@@ -49,8 +51,6 @@ services:
     environment:
       - CRON_SECRET=${CRON_SECRET}
       - APP_URL=http://app:3000
-    volumes:
-      - ./scheduler:/scheduler:ro
     command: ["sh", "/scheduler/entrypoint.sh"]
 
     networks:
