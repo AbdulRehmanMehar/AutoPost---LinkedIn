@@ -53,11 +53,15 @@ services:
       sh -c "
         apk add --no-cache curl &&
         echo 'Waiting for app health...' &&
-        until curl -sf \"\$APP_URL/api/health\" > /dev/null; do sleep 2; done &&
+        until curl -sf \$APP_URL/api/health > /dev/null; do sleep 2; done &&
         echo 'Setting up cron jobs...' &&
         touch /var/log/cron-publish.log /var/log/cron-engage.log &&
-        echo '*/5 * * * * curl -s -H \"Authorization: Bearer '\"\$CRON_SECRET\"'\" '\"\$APP_URL\"'/api/cron/publish >> /var/log/cron-publish.log 2>&1' >> /etc/crontabs/root &&
-        echo '*/15 * * * * curl -s -H \"Authorization: Bearer '\"\$CRON_SECRET\"'\" '\"\$APP_URL\"'/api/cron/engage >> /var/log/cron-engage.log 2>&1' >> /etc/crontabs/root &&
+        cat >> /etc/crontabs/root << 'EOF'
+      */5 * * * * curl -s -H \"Authorization: Bearer \$CRON_SECRET\" \$APP_URL/api/cron/publish >> /var/log/cron-publish.log 2>&1
+      */15 * * * * curl -s -H \"Authorization: Bearer \$CRON_SECRET\" \$APP_URL/api/cron/engage >> /var/log/cron-engage.log 2>&1
+      EOF
+        sed -i \"s|\\\$CRON_SECRET|\$CRON_SECRET|g\" /etc/crontabs/root &&
+        sed -i \"s|\\\$APP_URL|\$APP_URL|g\" /etc/crontabs/root &&
         echo 'Cron jobs installed:' && cat /etc/crontabs/root &&
         echo 'Log files created. Cron will run at scheduled times.' &&
         crond -f -l 2
