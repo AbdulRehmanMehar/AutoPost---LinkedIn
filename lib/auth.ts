@@ -4,6 +4,8 @@ import connectToDatabase from '@/lib/mongodb';
 import User from '@/lib/models/User';
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  secret: process.env.AUTH_SECRET,
+  trustHost: true,
   providers: [
     LinkedIn({
       clientId: process.env.LINKEDIN_CLIENT_ID!,
