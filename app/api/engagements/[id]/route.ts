@@ -101,10 +101,12 @@ export async function PUT(request: NextRequest, context: RouteContext) {
     }
 
     // Regenerate AI comment if requested
-    if (regenerateComment && engagement.postContent) {
+    if (regenerateComment) {
       try {
+        // Use post content if available, otherwise use generic context
+        const contentForAI = engagement.postContent || `LinkedIn post from ${engagement.postAuthor || 'a professional'}`;
         engagement.aiGeneratedComment = await generateComment({
-          postContent: engagement.postContent,
+          postContent: contentForAI,
           postAuthor: engagement.postAuthor,
           style: 'professional',
         });
@@ -179,21 +181,42 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json({ error: 'Already engaged with this post' }, { status: 400 });
     }
 
-    // Determine comment to use
-    const commentToPost = engagement.userEditedComment || engagement.aiGeneratedComment;
+    // Determine comment to use - generate one if needed for comment-type engagements
+    let commentToPost = engagement.userEditedComment || engagement.aiGeneratedComment;
+    
+    const needsComment = engagement.engagementType === 'comment' || engagement.engagementType === 'both';
+    
+    if (needsComment && !commentToPost) {
+      // Generate a comment using AI
+      try {
+        // Use post content if available, otherwise use a generic prompt based on URL
+        const contentForAI = engagement.postContent || `LinkedIn post from ${engagement.postAuthor || 'a professional'}`;
+        commentToPost = await generateComment({
+          postContent: contentForAI,
+          postAuthor: engagement.postAuthor,
+          style: 'professional',
+        });
+        // Save the generated comment
+        engagement.aiGeneratedComment = commentToPost;
+      } catch (aiError) {
+        console.error('AI comment generation failed:', aiError);
+        return NextResponse.json({ 
+          error: 'Failed to generate comment. Please add a comment manually or try again.' 
+        }, { status: 500 });
+      }
+    }
 
     // Execute engagement
     const result = await engageWithPost(session.user.email, engagement.postUrn, {
       like: engagement.engagementType === 'like' || engagement.engagementType === 'both',
-      comment: (engagement.engagementType === 'comment' || engagement.engagementType === 'both') 
-        ? commentToPost 
-        : undefined,
+      comment: needsComment ? commentToPost : undefined,
     });
 
-    if (result.success) {
+    // Mark as engaged if at least one action succeeded (partial success is still success)
+    if (result.success || result.liked || result.commented) {
       engagement.status = 'engaged';
       engagement.engagedAt = new Date();
-      engagement.error = undefined;
+      engagement.error = result.error; // May have partial error (e.g., like failed but comment worked)
     } else {
       engagement.status = 'failed';
       engagement.error = result.error;

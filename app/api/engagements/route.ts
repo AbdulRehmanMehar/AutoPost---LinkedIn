@@ -7,7 +7,7 @@ import {
   IEngagementTarget,
   EngagementType 
 } from '@/lib/models/Engagement';
-import { extractPostUrn, getPostDetails } from '@/lib/linkedin-engagement';
+import { extractPostUrn, getPostDetails, scrapeLinkedInPost } from '@/lib/linkedin-engagement';
 import { generateComment, generateCommentVariations } from '@/lib/openai';
 
 // GET /api/engagements - List engagement targets
@@ -80,11 +80,13 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     const { 
       postUrl, 
+      postContent: providedContent,  // User can optionally provide content
       engagementType = 'both',
       generateAIComment = true,
       scheduledFor,
     }: {
       postUrl: string;
+      postContent?: string;
       engagementType?: EngagementType;
       generateAIComment?: boolean;
       scheduledFor?: string;
@@ -115,15 +117,38 @@ export async function POST(request: NextRequest) {
       }, { status: 409 });
     }
 
-    // Try to fetch post details (may fail for some posts, that's okay)
-    let postContent: string | undefined;
+    // Try to fetch post details
+    let postContent: string | undefined = providedContent;
     let postAuthor: string | undefined;
+    let postAuthorName: string | undefined;
 
-    const postDetails = await getPostDetails(session.user.email, postUrn);
-    if (postDetails.success && postDetails.post) {
-      postContent = postDetails.post.content;
-      postAuthor = postDetails.post.author;
+    // Extract author from URL if possible (e.g., /posts/username_...)
+    const authorMatch = postUrl.match(/linkedin\.com\/posts\/([^_\/]+)/);
+    if (authorMatch) {
+      postAuthor = authorMatch[1];
     }
+
+    // First try scraping the public page (works without API auth)
+    if (!postContent) {
+      const scraped = await scrapeLinkedInPost(postUrl);
+      if (scraped.success && scraped.data) {
+        postContent = scraped.data.content;
+        postAuthor = postAuthor || scraped.data.author;
+        postAuthorName = scraped.data.authorName;
+      }
+    }
+
+    // Fallback: Try LinkedIn API (only works for your own posts)
+    if (!postContent) {
+      const postDetails = await getPostDetails(session.user.email, postUrn);
+      if (postDetails.success && postDetails.post) {
+        postContent = postDetails.post.content;
+        postAuthor = postAuthor || postDetails.post.author;
+      }
+    }
+
+    // Use author name if available, otherwise username
+    const authorForAI = postAuthorName || postAuthor;
 
     // Generate AI comment if requested
     let aiGeneratedComment: string | undefined;
@@ -132,7 +157,7 @@ export async function POST(request: NextRequest) {
         if (postContent) {
           aiGeneratedComment = await generateComment({
             postContent,
-            postAuthor,
+            postAuthor: authorForAI,
             style: 'professional',
           });
         }
@@ -146,7 +171,7 @@ export async function POST(request: NextRequest) {
       userId: user._id,
       postUrl,
       postUrn,
-      postAuthor,
+      postAuthor: authorForAI || postAuthor,
       postContent,
       engagementType,
       aiGeneratedComment,
@@ -225,12 +250,63 @@ export async function PUT(request: NextRequest) {
         continue;
       }
 
+      // Extract author from URL if possible
+      let postAuthor: string | undefined;
+      let postAuthorName: string | undefined;
+      const authorMatch = postUrl.match(/linkedin\.com\/posts\/([^_\/]+)/);
+      if (authorMatch) {
+        postAuthor = authorMatch[1];
+      }
+
+      // Try scraping the public page first
+      let postContent: string | undefined;
+      try {
+        const scraped = await scrapeLinkedInPost(postUrl);
+        if (scraped.success && scraped.data) {
+          postContent = scraped.data.content;
+          postAuthor = postAuthor || scraped.data.author;
+          postAuthorName = scraped.data.authorName;
+        }
+      } catch {
+        // Ignore scraping errors
+      }
+
+      // Fallback: Try LinkedIn API (only works for own posts)
+      if (!postContent) {
+        try {
+          const postDetails = await getPostDetails(session.user.email, postUrn);
+          if (postDetails.success && postDetails.post) {
+            postContent = postDetails.post.content;
+            postAuthor = postAuthor || postDetails.post.author;
+          }
+        } catch {
+          // Ignore - we'll generate generic comments
+        }
+      }
+
+      // Generate AI comment if we have content and engagement type needs comment
+      let aiGeneratedComment: string | undefined;
+      if (postContent && (engagementType === 'comment' || engagementType === 'both')) {
+        try {
+          aiGeneratedComment = await generateComment({
+            postContent,
+            postAuthor: postAuthorName || postAuthor,
+            style: 'professional',
+          });
+        } catch {
+          // Continue without AI comment - can be generated later
+        }
+      }
+
       try {
         await EngagementTarget.create({
           userId: user._id,
           postUrl,
           postUrn,
+          postAuthor: postAuthorName || postAuthor,
+          postContent,
           engagementType,
+          aiGeneratedComment,
           status: 'pending',
         });
         results.push({ url: postUrl, success: true });

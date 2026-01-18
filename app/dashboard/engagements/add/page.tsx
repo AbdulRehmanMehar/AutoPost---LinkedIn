@@ -9,6 +9,7 @@ export default function AddEngagementPage() {
   const router = useRouter();
   const [mode, setMode] = useState<'single' | 'bulk'>('single');
   const [postUrl, setPostUrl] = useState('');
+  const [postContent, setPostContent] = useState('');
   const [bulkUrls, setBulkUrls] = useState('');
   const [engagementType, setEngagementType] = useState<'like' | 'comment' | 'both'>('both');
   const [generateAIComment, setGenerateAIComment] = useState(true);
@@ -29,6 +30,7 @@ export default function AddEngagementPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           postUrl: postUrl.trim(),
+          postContent: postContent.trim() || undefined,
           engagementType,
           generateAIComment,
         }),
@@ -153,6 +155,22 @@ export default function AddEngagementPage() {
             />
             <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
               Copy the URL from a LinkedIn post you want to engage with
+            </p>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+              Post Content <span className="text-zinc-400">(optional but recommended)</span>
+            </label>
+            <textarea
+              value={postContent}
+              onChange={(e) => setPostContent(e.target.value)}
+              placeholder="Copy and paste the post content here for better AI-generated comments..."
+              rows={4}
+              className="mt-1 block w-full rounded-lg border border-zinc-300 px-4 py-2.5 text-sm dark:border-zinc-700 dark:bg-zinc-800"
+            />
+            <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
+              LinkedIn API doesn&apos;t allow reading other users&apos; posts. Paste the content for better AI comments.
             </p>
           </div>
 

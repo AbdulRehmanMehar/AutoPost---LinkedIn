@@ -26,6 +26,134 @@ interface PostDetails {
   content: string;
 }
 
+interface ScrapedPostData {
+  content?: string;
+  author?: string;
+  authorName?: string;
+  title?: string;
+}
+
+// ============================================
+// Web Scraping - Fetch Post Content from URL
+// ============================================
+
+/**
+ * Scrape LinkedIn post content from the public page
+ * This extracts data from meta tags and embedded JSON without requiring auth
+ */
+export async function scrapeLinkedInPost(postUrl: string): Promise<{ success: boolean; data?: ScrapedPostData; error?: string }> {
+  try {
+    // Fetch the page with browser-like headers
+    const response = await fetch(postUrl, {
+      headers: {
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+      },
+    });
+
+    if (!response.ok) {
+      return { success: false, error: `Failed to fetch: ${response.status}` };
+    }
+
+    const html = await response.text();
+    const data: ScrapedPostData = {};
+
+    // Extract from Open Graph meta tags
+    const ogDescriptionMatch = html.match(/<meta[^>]*property="og:description"[^>]*content="([^"]*)"[^>]*>/i)
+      || html.match(/<meta[^>]*content="([^"]*)"[^>]*property="og:description"[^>]*>/i);
+    if (ogDescriptionMatch) {
+      data.content = decodeHTMLEntities(ogDescriptionMatch[1]);
+    }
+
+    const ogTitleMatch = html.match(/<meta[^>]*property="og:title"[^>]*content="([^"]*)"[^>]*>/i)
+      || html.match(/<meta[^>]*content="([^"]*)"[^>]*property="og:title"[^>]*>/i);
+    if (ogTitleMatch) {
+      data.title = decodeHTMLEntities(ogTitleMatch[1]);
+    }
+
+    // Try to extract author from title or URL
+    // Title format is often "Author Name on LinkedIn: post content..."
+    if (data.title) {
+      const authorFromTitle = data.title.match(/^([^|]+?)(?:\s+on\s+LinkedIn|\s*\|)/i);
+      if (authorFromTitle) {
+        data.authorName = authorFromTitle[1].trim();
+      }
+    }
+
+    // Extract author username from URL
+    const authorFromUrl = postUrl.match(/linkedin\.com\/posts\/([^_\/]+)/);
+    if (authorFromUrl) {
+      data.author = authorFromUrl[1];
+    }
+
+    // Try to find JSON-LD data which has richer content
+    const jsonLdMatch = html.match(/<script[^>]*type="application\/ld\+json"[^>]*>([\s\S]*?)<\/script>/gi);
+    if (jsonLdMatch) {
+      for (const match of jsonLdMatch) {
+        try {
+          const jsonContent = match.replace(/<script[^>]*>|<\/script>/gi, '');
+          const jsonData = JSON.parse(jsonContent);
+          
+          // Look for Article or SocialMediaPosting schema
+          if (jsonData['@type'] === 'Article' || jsonData['@type'] === 'SocialMediaPosting') {
+            if (jsonData.articleBody) {
+              data.content = jsonData.articleBody;
+            }
+            if (jsonData.author?.name) {
+              data.authorName = jsonData.author.name;
+            }
+          }
+        } catch {
+          // Ignore JSON parse errors
+        }
+      }
+    }
+
+    // Also look for the post content in the page's data attributes or specific divs
+    // LinkedIn sometimes embeds content in data-* attributes
+    const commentaryMatch = html.match(/data-test-id="main-feed-activity-card__commentary"[^>]*>([^<]+)</i)
+      || html.match(/<span[^>]*class="[^"]*break-words[^"]*"[^>]*>([^<]{50,})</i);
+    if (commentaryMatch && !data.content) {
+      data.content = decodeHTMLEntities(commentaryMatch[1]);
+    }
+
+    if (!data.content && !data.title) {
+      return { success: false, error: 'Could not extract post content from page' };
+    }
+
+    // Use title as content if no description found
+    if (!data.content && data.title) {
+      // Title often contains the beginning of the post
+      data.content = data.title.replace(/^[^:]+:\s*/, ''); // Remove "Author on LinkedIn: " prefix
+    }
+
+    return { success: true, data };
+  } catch (error) {
+    console.error('Error scraping LinkedIn post:', error);
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' };
+  }
+}
+
+/**
+ * Decode HTML entities like &amp; &quot; etc.
+ */
+function decodeHTMLEntities(text: string): string {
+  return text
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&#x([0-9A-Fa-f]+);/g, (_, hex) => String.fromCharCode(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCharCode(parseInt(dec, 10)));
+}
+
 // ============================================
 // Helper Functions
 // ============================================
