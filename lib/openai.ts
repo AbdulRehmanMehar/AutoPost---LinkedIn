@@ -2,7 +2,7 @@ import OpenAI from 'openai';
 import { StructuredInput } from './models/Post';
 
 const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+  apiKey: process.env.O_API_KEY ?? process.env.OPENAI_API_KEY,
 });
 
 const LINKEDIN_POST_SYSTEM_PROMPT = `You are an expert LinkedIn content creator who writes posts that perform well and build credibility. You write as an individual builder/professional, NOT as a company or marketing team.
