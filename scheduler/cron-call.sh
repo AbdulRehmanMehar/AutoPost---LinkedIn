@@ -16,4 +16,9 @@ fi
 : "${APP_URL:?APP_URL is required}"
 : "${CRON_SECRET:?CRON_SECRET is required}"
 
-curl -fsS -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/$endpoint"
+if LC_ALL=C printf %s "$CRON_SECRET" | grep -Eq '^[ -~]+$'; then
+  curl -fsS -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/$endpoint"
+else
+  # Some HTTP stacks reject non-ASCII header values; use URL-encoded query param.
+  curl -G -fsS --data-urlencode "cron_secret=$CRON_SECRET" "$APP_URL/api/cron/$endpoint"
+fi

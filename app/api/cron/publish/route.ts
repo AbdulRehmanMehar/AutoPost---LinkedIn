@@ -11,11 +11,19 @@ import User from '@/lib/models/User';
 export async function GET(request: Request) {
   try {
     // Verify the request is authorized (use a secret key for cron jobs)
-    const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret) {
+      const authHeader = request.headers.get('authorization') ?? '';
+      const xCronSecret = request.headers.get('x-cron-secret') ?? '';
+      const url = new URL(request.url);
+      const querySecret = url.searchParams.get('cron_secret') ?? url.searchParams.get('token') ?? '';
 
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7) : '';
+      const authorized = bearerToken === cronSecret || xCronSecret === cronSecret || querySecret === cronSecret;
+
+      if (!authorized) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
     }
 
     await connectToDatabase();
