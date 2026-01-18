@@ -56,8 +56,8 @@ services:
         sleep 10 &&
         echo 'Setting up cron jobs...' &&
         touch /var/log/cron-publish.log /var/log/cron-engage.log &&
-        echo '*/5 * * * * curl -s -H \"Authorization: Bearer $${CRON_SECRET}\" $${APP_URL}/api/cron/publish >> /var/log/cron-publish.log 2>&1' >> /etc/crontabs/root &&
-        echo '*/15 * * * * curl -s -H \"Authorization: Bearer $${CRON_SECRET}\" $${APP_URL}/api/cron/engage >> /var/log/cron-engage.log 2>&1' >> /etc/crontabs/root &&
+        echo '*/5 * * * * curl -s -H \"Authorization: Bearer '\"\$CRON_SECRET\"'\" '\"\$APP_URL\"'/api/cron/publish >> /var/log/cron-publish.log 2>&1' >> /etc/crontabs/root &&
+        echo '*/15 * * * * curl -s -H \"Authorization: Bearer '\"\$CRON_SECRET\"'\" '\"\$APP_URL\"'/api/cron/engage >> /var/log/cron-engage.log 2>&1' >> /etc/crontabs/root &&
         echo 'Cron jobs installed:' && cat /etc/crontabs/root &&
         echo 'Starting crond...' &&
         crond -f -l 2
