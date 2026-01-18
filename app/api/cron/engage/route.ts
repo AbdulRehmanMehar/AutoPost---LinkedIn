@@ -54,30 +54,30 @@ export async function GET(request: Request) {
       engagementsQueried: 0,
     };
 
-    // Get all users with engagement settings enabled
-    const allSettings = await EngagementSettings.find({
-      $or: [{ autoEngageEnabled: true }, { autoReplyEnabled: true }]
+    // Get ALL users who have pending engagements in their queue
+    // This ensures engagements are processed regardless of autoEngageEnabled setting
+    const usersWithPendingEngagements = await EngagementTarget.distinct('userId', {
+      status: { $in: ['pending', 'approved'] }
     });
-    debug.settingsFound = allSettings.length;
 
-    // If no settings found, also try to get all engagements directly
-    if (allSettings.length === 0) {
-      // Fallback: process all users who have engagements
-      const usersWithEngagements = await EngagementTarget.distinct('userId');
-      for (const usrId of usersWithEngagements) {
-        const usr = await User.findById(usrId);
-        if (!usr || !usr.linkedinAccessToken) continue;
-        
-        // Get or create settings for this user
-        const stg = await getOrCreateEngagementSettings(usrId);
-        allSettings.push(stg as typeof allSettings[0]);
-      }
-      debug.settingsFound = allSettings.length;
-    }
+    // Also get users who want auto-reply enabled (for comment monitoring)
+    const usersWithAutoReply = await EngagementSettings.find({ autoReplyEnabled: true });
+    const autoReplyUserIds = new Set(usersWithAutoReply.map(s => s.userId.toString()));
 
-    for (const settings of allSettings) {
-      const user = await User.findById(settings.userId);
+    // Combine: process engagements for all users with pending items
+    const allUserIds = new Set([
+      ...usersWithPendingEngagements.map(id => id.toString()),
+      ...autoReplyUserIds
+    ]);
+
+    debug.settingsFound = allUserIds.size;
+
+    for (const odUserId of allUserIds) {
+      const user = await User.findById(odUserId);
       if (!user || !user.linkedinAccessToken) continue;
+      
+      // Get or create settings for this user
+      const settings = await getOrCreateEngagementSettings(user._id);
       debug.usersProcessed++;
 
       // Calculate how many engagements we can do today
@@ -126,29 +126,36 @@ export async function GET(request: Request) {
               continue;
             }
 
-            // Generate comment if needed
+            const needsComment = engagement.engagementType === 'comment' || engagement.engagementType === 'both';
+            
+            // Get existing comment or generate one
             let commentToPost = engagement.userEditedComment || engagement.aiGeneratedComment;
             
-            if (!commentToPost && engagement.postContent && 
-                (engagement.engagementType === 'comment' || engagement.engagementType === 'both')) {
+            // Generate comment if needed and none exists
+            if (needsComment && !commentToPost) {
               try {
+                // Use post content if available, otherwise use generic context
+                const contentForAI = engagement.postContent || `LinkedIn post from ${engagement.postAuthor || 'a professional'}`;
                 commentToPost = await generateComment({
-                  postContent: engagement.postContent,
+                  postContent: contentForAI,
                   postAuthor: engagement.postAuthor,
-                  style: settings.engagementStyle,
+                  style: settings.engagementStyle || 'professional',
                 });
                 engagement.aiGeneratedComment = commentToPost;
               } catch (aiErr) {
                 console.error('AI comment generation failed:', aiErr);
+                engagement.status = 'failed';
+                engagement.error = 'Failed to generate AI comment';
+                await engagement.save();
+                results.engagements.push({ id: engagement._id.toString(), status: 'failed', error: 'AI comment generation failed' });
+                continue;
               }
             }
 
             // Execute engagement
             const result = await engageWithPost(user.email, engagement.postUrn, {
               like: engagement.engagementType === 'like' || engagement.engagementType === 'both',
-              comment: (engagement.engagementType === 'comment' || engagement.engagementType === 'both') 
-                ? commentToPost 
-                : undefined,
+              comment: needsComment ? commentToPost : undefined,
             });
 
             if (result.success || result.liked || result.commented) {
