@@ -32,11 +32,7 @@ export async function GET(request: Request) {
       const querySecret = url.searchParams.get('cron_secret') ?? url.searchParams.get('token') ?? '';
 
       const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7) : '';
-
-      const authorized =
-        bearerToken === cronSecret ||
-        xCronSecret === cronSecret ||
-        querySecret === cronSecret;
+      const authorized = bearerToken === cronSecret || xCronSecret === cronSecret || querySecret === cronSecret;
 
       if (!authorized) {
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
@@ -51,14 +47,38 @@ export async function GET(request: Request) {
       newComments: 0,
     };
 
+    // Debug info
+    const debug = {
+      settingsFound: 0,
+      usersProcessed: 0,
+      engagementsQueried: 0,
+    };
+
     // Get all users with engagement settings enabled
     const allSettings = await EngagementSettings.find({
       $or: [{ autoEngageEnabled: true }, { autoReplyEnabled: true }]
     });
+    debug.settingsFound = allSettings.length;
+
+    // If no settings found, also try to get all engagements directly
+    if (allSettings.length === 0) {
+      // Fallback: process all users who have engagements
+      const usersWithEngagements = await EngagementTarget.distinct('userId');
+      for (const usrId of usersWithEngagements) {
+        const usr = await User.findById(usrId);
+        if (!usr || !usr.linkedinAccessToken) continue;
+        
+        // Get or create settings for this user
+        const stg = await getOrCreateEngagementSettings(usrId);
+        allSettings.push(stg as typeof allSettings[0]);
+      }
+      debug.settingsFound = allSettings.length;
+    }
 
     for (const settings of allSettings) {
       const user = await User.findById(settings.userId);
       if (!user || !user.linkedinAccessToken) continue;
+      debug.usersProcessed++;
 
       // Calculate how many engagements we can do today
       const todayStart = new Date();
@@ -67,7 +87,8 @@ export async function GET(request: Request) {
       // ============================================
       // Part 1: Process Engagement Queue
       // ============================================
-      if (settings.autoEngageEnabled) {
+      // Always process engagement queue (don't require autoEngageEnabled flag)
+      {
         // Count today's engagements
         const todayEngagements = await EngagementTarget.countDocuments({
           userId: user._id,
@@ -75,7 +96,8 @@ export async function GET(request: Request) {
           engagedAt: { $gte: todayStart },
         });
 
-        const remainingEngagements = settings.dailyEngagementLimit - todayEngagements;
+        const limit = settings.dailyEngagementLimit || 10;
+        const remainingEngagements = limit - todayEngagements;
 
         if (remainingEngagements > 0) {
           // Get pending engagements (approved or auto-approved based on settings)
@@ -87,16 +109,20 @@ export async function GET(request: Request) {
             $or: [
               { scheduledFor: { $lte: new Date() } },
               { scheduledFor: null },
+              { scheduledFor: { $exists: false } },
             ],
           })
             .sort({ scheduledFor: 1, createdAt: 1 })
             .limit(Math.min(remainingEngagements, 5)); // Max 5 per cron run
+
+          debug.engagementsQueried = pendingEngagements.length;
 
           for (const engagement of pendingEngagements) {
             if (!engagement.postUrn) {
               engagement.status = 'failed';
               engagement.error = 'No post URN';
               await engagement.save();
+              results.engagements.push({ id: engagement._id.toString(), status: 'failed', error: 'No post URN' });
               continue;
             }
 
@@ -267,6 +293,7 @@ export async function GET(request: Request) {
       repliesProcessed: results.replies.length,
       newCommentsFound: results.newComments,
       details: results,
+      debug,
     });
   } catch (error) {
     console.error('Engagement cron error:', error);
