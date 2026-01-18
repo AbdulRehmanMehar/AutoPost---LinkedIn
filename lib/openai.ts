@@ -259,3 +259,232 @@ Please provide the improved version only, without any explanations.`,
 
   return improvedContent.trim();
 }
+
+// ============================================
+// Engagement AI - Comment & Reply Generation
+// ============================================
+
+const ENGAGEMENT_SYSTEM_PROMPT = `You are an expert at writing authentic, engaging LinkedIn comments and replies. You write as a thoughtful professional who genuinely engages with content.
+
+## Core Principles:
+
+1. **Be authentic and specific**
+   - Reference specific points from the post/comment you're responding to
+   - Add genuine value or perspective
+   - Never use generic phrases like "Great post!" or "Love this!"
+   - Sound like a real person, not a bot
+
+2. **Keep it concise**
+   - Comments: 50-150 characters ideal, max 280
+   - Replies: 30-100 characters ideal, max 200
+   - One clear thought per comment
+
+3. **Add value through:**
+   - Sharing a related experience or insight
+   - Asking a thoughtful follow-up question
+   - Offering a complementary perspective
+   - Acknowledging a specific point that resonated
+
+4. **Avoid:**
+   - Empty flattery ("Amazing!", "So inspiring!")
+   - Self-promotion or links
+   - Overusing emojis (0-1 max)
+   - Corporate speak or buzzwords
+   - Starting with "I" every time
+   - Phrases like "couldn't agree more", "this resonates"
+
+5. **Match the tone**
+   - Professional posts → Professional comments
+   - Casual posts → More relaxed comments
+   - Technical posts → Technical engagement
+   - Personal stories → Empathetic responses
+
+6. **Natural language:**
+   - Use contractions (that's, don't, it's)
+   - Vary your sentence structure
+   - Write how you'd actually talk to a colleague
+   - Don't overexplain`;
+
+export type EngagementStyle = 'professional' | 'casual' | 'friendly' | 'thoughtful';
+
+export interface GenerateCommentOptions {
+  postContent: string;
+  postAuthor?: string;
+  style?: EngagementStyle;
+  context?: string; // Additional context about the user/relationship
+}
+
+export interface GenerateReplyOptions {
+  originalPostContent: string;
+  commentText: string;
+  commenterName: string;
+  style?: EngagementStyle;
+  context?: string;
+}
+
+/**
+ * Generate an authentic comment for a LinkedIn post
+ */
+export async function generateComment(options: GenerateCommentOptions): Promise<string> {
+  const { postContent, postAuthor, style = 'professional', context } = options;
+
+  const styleGuide = {
+    professional: 'Write in a professional but warm tone. Focus on insights and substance.',
+    casual: 'Write in a relaxed, conversational tone. Be friendly but still add value.',
+    friendly: 'Write in a warm, supportive tone. Show genuine interest and encouragement.',
+    thoughtful: 'Write in a reflective, thoughtful tone. Ask deeper questions or share nuanced perspectives.',
+  };
+
+  const userPrompt = `Write a LinkedIn comment for this post:
+
+---
+${postAuthor ? `Author: ${postAuthor}\n` : ''}Post:
+${postContent}
+---
+
+${context ? `Context: ${context}\n` : ''}
+Style: ${styleGuide[style]}
+
+Requirements:
+- Keep it 50-150 characters (short and punchy)
+- Be specific - reference something from the post
+- Add value or a perspective, don't just compliment
+- Use 0-1 emoji max
+- Sound natural and human
+- Don't start with "Great post" or similar
+
+Return ONLY the comment text, nothing else.`;
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.8,
+    max_tokens: 200,
+  });
+
+  const comment = response.choices[0]?.message?.content;
+
+  if (!comment) {
+    throw new Error('Failed to generate comment');
+  }
+
+  return comment.trim();
+}
+
+/**
+ * Generate a reply to a comment on your LinkedIn post
+ */
+export async function generateReply(options: GenerateReplyOptions): Promise<string> {
+  const { originalPostContent, commentText, commenterName, style = 'professional', context } = options;
+
+  const styleGuide = {
+    professional: 'Reply professionally but warmly. Acknowledge their point and add value.',
+    casual: 'Reply in a relaxed, conversational way. Be friendly and approachable.',
+    friendly: 'Reply warmly and supportively. Show appreciation for their engagement.',
+    thoughtful: 'Reply thoughtfully. Address their specific point and expand on it.',
+  };
+
+  const userPrompt = `Write a reply to this comment on your LinkedIn post:
+
+---
+Your original post:
+${originalPostContent}
+
+Comment from ${commenterName}:
+"${commentText}"
+---
+
+${context ? `Context: ${context}\n` : ''}
+Style: ${styleGuide[style]}
+
+Requirements:
+- Keep it 30-100 characters (brief and personal)
+- Address them naturally (can use their first name)
+- Acknowledge their specific point
+- Don't overdo the gratitude
+- Use 0-1 emoji max
+- Sound like a real person responding
+
+Return ONLY the reply text, nothing else.`;
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.8,
+    max_tokens: 150,
+  });
+
+  const reply = response.choices[0]?.message?.content;
+
+  if (!reply) {
+    throw new Error('Failed to generate reply');
+  }
+
+  return reply.trim();
+}
+
+/**
+ * Generate multiple comment variations for user to choose from
+ */
+export async function generateCommentVariations(
+  options: GenerateCommentOptions,
+  count: number = 3
+): Promise<string[]> {
+  const { postContent, postAuthor, style = 'professional', context } = options;
+
+  const styleGuide = {
+    professional: 'professional but warm',
+    casual: 'relaxed and conversational',
+    friendly: 'warm and supportive',
+    thoughtful: 'reflective and insightful',
+  };
+
+  const userPrompt = `Generate ${count} different LinkedIn comment options for this post:
+
+---
+${postAuthor ? `Author: ${postAuthor}\n` : ''}Post:
+${postContent}
+---
+
+${context ? `Context: ${context}\n` : ''}
+Tone: ${styleGuide[style]}
+
+Requirements for EACH comment:
+- 50-150 characters
+- Be specific to the post content
+- Add value, don't just compliment
+- 0-1 emoji max
+- Sound natural and human
+
+Return ONLY the ${count} comments, each on its own line, numbered 1-${count}. No other text.`;
+
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.9,
+    max_tokens: 500,
+  });
+
+  const content = response.choices[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('Failed to generate comments');
+  }
+
+  // Parse numbered list
+  const comments = content
+    .split('\n')
+    .map(line => line.replace(/^\d+[\.\)]\s*/, '').trim())
+    .filter(line => line.length > 0);
+
+  return comments.slice(0, count);
+}
