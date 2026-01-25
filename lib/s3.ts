@@ -70,6 +70,20 @@ export function getS3KeyFromUrl(url: string): string | null {
     return url.slice(prefix.length);
   }
   
+  // Also try to extract key from URLs with different hosts (e.g., host.docker.internal vs IP)
+  // Pattern: http(s)://[any-host]:[port]/[bucket]/[key]
+  try {
+    const urlObj = new URL(url);
+    const pathParts = urlObj.pathname.split('/').filter(Boolean);
+    
+    // Check if first path segment is the bucket name
+    if (pathParts[0] === bucket && pathParts.length > 1) {
+      return pathParts.slice(1).join('/');
+    }
+  } catch {
+    // Invalid URL, return null
+  }
+  
   return null;
 }
 
