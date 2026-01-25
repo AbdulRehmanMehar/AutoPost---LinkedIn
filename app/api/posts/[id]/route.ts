@@ -75,7 +75,11 @@ export async function PUT(
 
     // If publishing now
     if (publishNow) {
-      const result = await postToLinkedIn(session.user.email, content || post.content);
+      const result = await postToLinkedIn(
+        session.user.email, 
+        content || post.content,
+        post.media || []
+      );
       
       post.content = content || post.content;
       post.status = result.success ? 'published' : 'failed';
