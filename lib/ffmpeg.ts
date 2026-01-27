@@ -341,7 +341,8 @@ export async function processVideoForLinkedIn(
     const needsResize = metadata.width > LINKEDIN_MAX_WIDTH || metadata.height > LINKEDIN_MAX_HEIGHT;
     if (needsResize) {
       // Scale to fit within max dimensions while maintaining aspect ratio
-      ffmpegArgs.push('-vf', `scale='min(${LINKEDIN_MAX_WIDTH},iw)':'min(${LINKEDIN_MAX_HEIGHT},ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`);
+      // Wrap in double quotes to prevent shell from interpreting parentheses
+      ffmpegArgs.push('-vf', `"scale='min(${LINKEDIN_MAX_WIDTH},iw)':'min(${LINKEDIN_MAX_HEIGHT},ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2"`);
       console.log(`Resizing video from ${metadata.width}x${metadata.height}`);
     }
     
