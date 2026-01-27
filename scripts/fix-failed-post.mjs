@@ -245,7 +245,7 @@ async function combineVideos(videoBuffers, layout = 'horizontal') {
     
     const maxDuration = Math.max(...videoInfos.map(v => v.duration));
     logInfo(`Longest video: ${maxDuration.toFixed(1)}s (shorter videos will loop)`);
-    logInfo(`Audio tracks: ${hasAnyAudio ? 'will mix available audio' : 'none (will be silent)'}`);
+    logInfo(`Audio tracks: ${hasAnyAudio ? 'will mix available audio' : 'none (will add silent audio for LinkedIn)'}`);
     
     // Build ffmpeg command with looping for shorter videos
     const ffmpegArgs = [];
@@ -256,6 +256,15 @@ async function combineVideos(videoBuffers, layout = 'horizontal') {
       ffmpegArgs.push('-i', path);
     }
     
+    // Add silent audio input (LinkedIn requires audio track)
+    if (!hasAnyAudio) {
+      ffmpegArgs.push('-f', 'lavfi');
+      ffmpegArgs.push('-t', maxDuration.toString());
+      ffmpegArgs.push('-i', 'anullsrc=channel_layout=stereo:sample_rate=44100');
+    }
+    
+    const silentAudioIndex = inputPaths.length; // Index of the silent audio input
+    
     // Build filter complex based on layout and number of videos
     let filterComplex = '';
     const numVideos = inputPaths.length;
@@ -264,42 +273,26 @@ async function combineVideos(videoBuffers, layout = 'horizontal') {
     if (numVideos === 2) {
       if (layout === 'horizontal') {
         // Side-by-side horizontally (1280x720 total)
-        filterComplex = `[0:v]scale=640:720:force_original_aspect_ratio=decrease,pad=640:720:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
-[1:v]scale=640:720:force_original_aspect_ratio=decrease,pad=640:720:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
-[v0][v1]hstack=inputs=2[vout]`;
+        filterComplex = `[0:v]scale=640:720:force_original_aspect_ratio=decrease,pad=640:720:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];[1:v]scale=640:720:force_original_aspect_ratio=decrease,pad=640:720:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];[v0][v1]hstack=inputs=2[vout]`;
       } else {
         // Stacked vertically
-        filterComplex = `[0:v]scale=1280:360:force_original_aspect_ratio=decrease,pad=1280:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
-[1:v]scale=1280:360:force_original_aspect_ratio=decrease,pad=1280:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
-[v0][v1]vstack=inputs=2[vout]`;
+        filterComplex = `[0:v]scale=1280:360:force_original_aspect_ratio=decrease,pad=1280:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];[1:v]scale=1280:360:force_original_aspect_ratio=decrease,pad=1280:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];[v0][v1]vstack=inputs=2[vout]`;
       }
     } else if (numVideos === 3) {
-      // 2 on top, 1 on bottom (centered)
-      filterComplex = `[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
-[1:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
-[2:v]scale=1280:360:force_original_aspect_ratio=decrease,pad=1280:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];
-[v0][v1]hstack=inputs=2[top];
-[top][v2]vstack=inputs=2[vout]`;
+      filterComplex = `[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];[1:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];[2:v]scale=1280:360:force_original_aspect_ratio=decrease,pad=1280:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];[v0][v1]hstack=inputs=2[top];[top][v2]vstack=inputs=2[vout]`;
     } else if (numVideos >= 4) {
       // 2x2 grid
-      filterComplex = `[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
-[1:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
-[2:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];
-[3:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v3];
-[v0][v1]hstack=inputs=2[top];
-[v2][v3]hstack=inputs=2[bottom];
-[top][bottom]vstack=inputs=2[vout]`;
+      filterComplex = `[0:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];[1:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];[2:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];[3:v]scale=640:360:force_original_aspect_ratio=decrease,pad=640:360:(ow-iw)/2:(oh-ih)/2,setsar=1[v3];[v0][v1]hstack=inputs=2[top];[v2][v3]hstack=inputs=2[bottom];[top][bottom]vstack=inputs=2[vout]`;
     }
     
-    // Add audio mixing only if any video has audio
+    // Add audio mixing if any video has audio
     if (hasAnyAudio) {
-      // Build audio mix filter for videos that have audio
       const audioInputs = videoInfos
         .map((info, i) => info.hasAudio ? `[${i}:a]` : null)
         .filter(Boolean);
       
       if (audioInputs.length > 0) {
-        filterComplex += `;\n${audioInputs.join('')}amix=inputs=${audioInputs.length}:duration=longest[aout]`;
+        filterComplex += `;${audioInputs.join('')}amix=inputs=${audioInputs.length}:duration=longest[aout]`;
       }
     }
     
@@ -308,22 +301,20 @@ async function combineVideos(videoBuffers, layout = 'horizontal') {
     
     if (hasAnyAudio && videoInfos.some(v => v.hasAudio)) {
       ffmpegArgs.push('-map', '[aout]');
+    } else {
+      // Map the silent audio input
+      ffmpegArgs.push('-map', `${silentAudioIndex}:a`);
     }
     
     ffmpegArgs.push('-t', maxDuration.toString());  // Limit to longest video duration
     ffmpegArgs.push('-c:v', 'libx264');
     ffmpegArgs.push('-preset', 'medium');
+    ffmpegArgs.push('-profile:v', 'high');    // LinkedIn requires High profile
+    ffmpegArgs.push('-level', '4.0');          // LinkedIn requires level 4.0 or lower
     ffmpegArgs.push('-crf', '23');
     ffmpegArgs.push('-pix_fmt', 'yuv420p');
-    
-    if (hasAnyAudio && videoInfos.some(v => v.hasAudio)) {
-      ffmpegArgs.push('-c:a', 'aac');
-      ffmpegArgs.push('-b:a', '128k');
-    } else {
-      // No audio - just don't include any audio track
-      // LinkedIn will accept videos without audio
-    }
-    
+    ffmpegArgs.push('-c:a', 'aac');
+    ffmpegArgs.push('-b:a', '128k');
     ffmpegArgs.push('-movflags', '+faststart');
     ffmpegArgs.push('-y');
     ffmpegArgs.push(outputPath);
@@ -334,7 +325,7 @@ async function combineVideos(videoBuffers, layout = 'horizontal') {
     const outputBuffer = await readFile(outputPath);
     const outputInfo = await getVideoInfo(outputPath);
     
-    logInfo(`Output: ${outputInfo.width}x${outputInfo.height}, ${outputInfo.duration.toFixed(1)}s`);
+    logInfo(`Output: ${outputInfo.width}x${outputInfo.height}, ${outputInfo.duration.toFixed(1)}s, audio: ${outputInfo.hasAudio ? 'yes' : 'no'}`);
     
     // Cleanup
     for (const path of inputPaths) {
@@ -430,11 +421,14 @@ ${colors.reset}`);
     logSuccess(`Found post: ${post._id}`);
     logInfo(`Status: ${post.status}`);
     logInfo(`Media items: ${post.media?.length || 0}`);
+    logInfo(`Original media items: ${post.originalMedia?.length || 0}`);
+    
+    // Use originalMedia if available (from previous combine attempts), otherwise use media
+    let media = post.originalMedia || post.media || [];
     
     // Check if post has multiple media
-    const media = post.media || [];
     if (media.length < 2) {
-      logError('Post does not have multiple media files');
+      logError('Post does not have multiple media files (checked both media and originalMedia)');
       process.exit(1);
     }
     

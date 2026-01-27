@@ -14,6 +14,7 @@ interface VideoMetadata {
   codec: string;
   bitrate: number;
   size: number;
+  hasAudio: boolean;
 }
 
 interface ProcessedMedia {
@@ -74,7 +75,10 @@ export async function combineVideos(
     const maxDuration = Math.max(...metadataList.map(m => m.duration));
     const minDuration = Math.min(...metadataList.map(m => m.duration));
     
-    console.log(`Combining ${videos.length} videos. Longest: ${maxDuration.toFixed(1)}s, Shortest: ${minDuration.toFixed(1)}s`);
+    // Check if any video has audio
+    const hasAnyAudio = metadataList.some(m => m.hasAudio);
+    
+    console.log(`Combining ${videos.length} videos. Longest: ${maxDuration.toFixed(1)}s, Shortest: ${minDuration.toFixed(1)}s, Audio: ${hasAnyAudio ? 'yes' : 'no (will add silent)'}`);
     
     if (maxDuration !== minDuration) {
       console.log('Shorter videos will be looped to match the longest video.');
@@ -100,60 +104,111 @@ export async function combineVideos(
       return `-i "${p}"`;
     }).join(' ');
     
+    // Add silent audio input for videos without audio (LinkedIn requires audio track)
+    const silentAudioInput = `-f lavfi -t ${maxDuration} -i anullsrc=channel_layout=stereo:sample_rate=44100`;
+    const silentAudioIndex = inputPaths.length; // Index of the silent audio input
+    
     if (videos.length === 2) {
       if (layout === 'vertical') {
         // Stack vertically (top/bottom)
         outputWidth = 1920;
         outputHeight = 1080;
-        filterComplex = `
-          [0:v]scale=1920:540:force_original_aspect_ratio=decrease,pad=1920:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
-          [1:v]scale=1920:540:force_original_aspect_ratio=decrease,pad=1920:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
-          [v0][v1]vstack=inputs=2[outv];
-          [0:a][1:a]amix=inputs=2:duration=longest[outa]
-        `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+        if (hasAnyAudio) {
+          filterComplex = `
+            [0:v]scale=1920:540:force_original_aspect_ratio=decrease,pad=1920:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
+            [1:v]scale=1920:540:force_original_aspect_ratio=decrease,pad=1920:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
+            [v0][v1]vstack=inputs=2[outv];
+            [0:a][1:a]amix=inputs=2:duration=longest[outa]
+          `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+        } else {
+          filterComplex = `
+            [0:v]scale=1920:540:force_original_aspect_ratio=decrease,pad=1920:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
+            [1:v]scale=1920:540:force_original_aspect_ratio=decrease,pad=1920:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
+            [v0][v1]vstack=inputs=2[outv]
+          `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+        }
       } else {
         // Side by side (left/right) - default for 2 videos
         outputWidth = 1920;
         outputHeight = 1080;
-        filterComplex = `
-          [0:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
-          [1:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
-          [v0][v1]hstack=inputs=2[outv];
-          [0:a][1:a]amix=inputs=2:duration=longest[outa]
-        `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+        if (hasAnyAudio) {
+          filterComplex = `
+            [0:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
+            [1:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
+            [v0][v1]hstack=inputs=2[outv];
+            [0:a][1:a]amix=inputs=2:duration=longest[outa]
+          `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+        } else {
+          filterComplex = `
+            [0:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
+            [1:v]scale=960:1080:force_original_aspect_ratio=decrease,pad=960:1080:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
+            [v0][v1]hstack=inputs=2[outv]
+          `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+        }
       }
     } else if (videos.length === 3) {
       // 2 on top, 1 centered on bottom
       outputWidth = 1920;
       outputHeight = 1080;
-      filterComplex = `
-        [0:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
-        [1:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
-        [2:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];
-        color=black:1920x540:d=${maxDuration}[black];
-        [v0][v1]hstack=inputs=2[top];
-        [black][v2]overlay=(W-w)/2:0[bottom];
-        [top][bottom]vstack=inputs=2[outv];
-        [0:a][1:a][2:a]amix=inputs=3:duration=longest[outa]
-      `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+      if (hasAnyAudio) {
+        filterComplex = `
+          [0:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
+          [1:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
+          [2:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];
+          color=black:1920x540:d=${maxDuration}[black];
+          [v0][v1]hstack=inputs=2[top];
+          [black][v2]overlay=(W-w)/2:0[bottom];
+          [top][bottom]vstack=inputs=2[outv];
+          [0:a][1:a][2:a]amix=inputs=3:duration=longest[outa]
+        `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+      } else {
+        filterComplex = `
+          [0:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
+          [1:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
+          [2:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];
+          color=black:1920x540:d=${maxDuration}[black];
+          [v0][v1]hstack=inputs=2[top];
+          [black][v2]overlay=(W-w)/2:0[bottom];
+          [top][bottom]vstack=inputs=2[outv]
+        `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+      }
     } else {
       // 4 videos: 2x2 grid
       outputWidth = 1920;
       outputHeight = 1080;
-      filterComplex = `
-        [0:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
-        [1:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
-        [2:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];
-        [3:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v3];
-        [v0][v1]hstack=inputs=2[top];
-        [v2][v3]hstack=inputs=2[bottom];
-        [top][bottom]vstack=inputs=2[outv];
-        [0:a][1:a][2:a][3:a]amix=inputs=4:duration=longest[outa]
-      `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+      if (hasAnyAudio) {
+        filterComplex = `
+          [0:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
+          [1:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
+          [2:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];
+          [3:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v3];
+          [v0][v1]hstack=inputs=2[top];
+          [v2][v3]hstack=inputs=2[bottom];
+          [top][bottom]vstack=inputs=2[outv];
+          [0:a][1:a][2:a][3:a]amix=inputs=4:duration=longest[outa]
+        `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+      } else {
+        filterComplex = `
+          [0:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v0];
+          [1:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v1];
+          [2:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v2];
+          [3:v]scale=960:540:force_original_aspect_ratio=decrease,pad=960:540:(ow-iw)/2:(oh-ih)/2,setsar=1[v3];
+          [v0][v1]hstack=inputs=2[top];
+          [v2][v3]hstack=inputs=2[bottom];
+          [top][bottom]vstack=inputs=2[outv]
+        `.replace(/\n/g, '').replace(/\s+/g, ' ').trim();
+      }
     }
     
-    // Build ffmpeg command - use maxDuration to include full longest video
-    const command = `ffmpeg ${inputArgs} -filter_complex "${filterComplex}" -map "[outv]" -map "[outa]" -c:v libx264 -preset medium -profile:v high -level 4.0 -crf 23 -c:a aac -b:a 128k -pix_fmt yuv420p -movflags +faststart -t ${maxDuration} -y "${outputPath}"`;
+    // Build ffmpeg command
+    // If no audio, add silent audio track (LinkedIn requires audio)
+    let command: string;
+    if (hasAnyAudio) {
+      command = `ffmpeg ${inputArgs} -filter_complex "${filterComplex}" -map "[outv]" -map "[outa]" -c:v libx264 -preset medium -profile:v high -level 4.0 -crf 23 -c:a aac -b:a 128k -pix_fmt yuv420p -movflags +faststart -t ${maxDuration} -y "${outputPath}"`;
+    } else {
+      // Add silent audio track for LinkedIn compatibility
+      command = `ffmpeg ${inputArgs} ${silentAudioInput} -filter_complex "${filterComplex}" -map "[outv]" -map ${silentAudioIndex}:a -c:v libx264 -preset medium -profile:v high -level 4.0 -crf 23 -c:a aac -b:a 128k -pix_fmt yuv420p -movflags +faststart -t ${maxDuration} -y "${outputPath}"`;
+    }
     
     console.log('Running ffmpeg combine command...');
     
@@ -200,6 +255,7 @@ async function getVideoMetadata(inputPath: string): Promise<VideoMetadata> {
     
     const data = JSON.parse(stdout);
     const videoStream = data.streams?.find((s: { codec_type: string }) => s.codec_type === 'video');
+    const audioStream = data.streams?.find((s: { codec_type: string }) => s.codec_type === 'audio');
     const format = data.format;
     
     return {
@@ -209,6 +265,7 @@ async function getVideoMetadata(inputPath: string): Promise<VideoMetadata> {
       codec: videoStream?.codec_name || 'unknown',
       bitrate: parseInt(format?.bit_rate || '0', 10),
       size: parseInt(format?.size || '0', 10),
+      hasAudio: !!audioStream,
     };
   } catch (error) {
     console.error('Failed to get video metadata:', error);
@@ -284,7 +341,7 @@ export async function processVideoForLinkedIn(
     const needsResize = metadata.width > LINKEDIN_MAX_WIDTH || metadata.height > LINKEDIN_MAX_HEIGHT;
     if (needsResize) {
       // Scale to fit within max dimensions while maintaining aspect ratio
-      ffmpegArgs.push('-vf', `scale='min(${LINKEDIN_MAX_WIDTH},iw)':min'(${LINKEDIN_MAX_HEIGHT},ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`);
+      ffmpegArgs.push('-vf', `scale='min(${LINKEDIN_MAX_WIDTH},iw)':'min(${LINKEDIN_MAX_HEIGHT},ih)':force_original_aspect_ratio=decrease,scale=trunc(iw/2)*2:trunc(ih/2)*2`);
       console.log(`Resizing video from ${metadata.width}x${metadata.height}`);
     }
     

@@ -85,8 +85,12 @@ async function uploadMedia(uploadUrl: string, fileBuffer: Buffer, accessToken: s
 async function checkAssetStatus(
   accessToken: string,
   asset: string
-): Promise<'PROCESSING' | 'AVAILABLE' | 'FAILED'> {
-  const response = await fetch(`https://api.linkedin.com/v2/assets/${encodeURIComponent(asset)}`, {
+): Promise<{ status: 'PROCESSING' | 'AVAILABLE' | 'FAILED'; details?: string }> {
+  // Extract just the asset ID from the URN
+  // urn:li:digitalmediaAsset:D4D05AQG1TkWry7Po3A -> D4D05AQG1TkWry7Po3A
+  const assetId = asset.includes(':') ? asset.split(':').pop() : asset;
+  
+  const response = await fetch(`https://api.linkedin.com/v2/assets/${assetId}`, {
     method: 'GET',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -94,44 +98,53 @@ async function checkAssetStatus(
   });
 
   if (!response.ok) {
-    console.error('Failed to check asset status:', await response.text());
-    return 'FAILED';
+    const errorText = await response.text();
+    console.error('Failed to check asset status:', errorText);
+    return { status: 'FAILED', details: errorText };
   }
 
   const data = await response.json();
-  const status = data.recipes?.[0]?.status || 'PROCESSING';
+  console.log('Asset status response:', JSON.stringify(data, null, 2));
   
-  if (status === 'AVAILABLE') return 'AVAILABLE';
-  if (status === 'PROCESSING' || status === 'WAITING_UPLOAD') return 'PROCESSING';
-  return 'FAILED';
+  const recipe = data.recipes?.[0];
+  const status = recipe?.status || 'PROCESSING';
+  
+  // Get more details if available
+  const details = recipe?.statusDetails || recipe?.errorMessage || '';
+  
+  if (status === 'AVAILABLE') return { status: 'AVAILABLE' };
+  if (status === 'PROCESSING' || status === 'WAITING_UPLOAD' || status === 'NEW') return { status: 'PROCESSING' };
+  return { status: 'FAILED', details: details || `Status: ${status}` };
 }
 
 async function waitForAssetReady(
   accessToken: string,
   asset: string,
   maxWaitMs: number = 120000 // 2 minutes max wait
-): Promise<boolean> {
+): Promise<{ ready: boolean; error?: string }> {
   const startTime = Date.now();
   const pollIntervalMs = 5000; // Poll every 5 seconds
   
   while (Date.now() - startTime < maxWaitMs) {
-    const status = await checkAssetStatus(accessToken, asset);
+    const { status, details } = await checkAssetStatus(accessToken, asset);
     
     if (status === 'AVAILABLE') {
-      return true;
+      return { ready: true };
     }
     
     if (status === 'FAILED') {
-      console.error(`Asset ${asset} processing failed`);
-      return false;
+      console.error(`Asset ${asset} processing failed: ${details}`);
+      return { ready: false, error: details };
     }
+    
+    console.log(`Asset ${asset} still processing... (${Math.round((Date.now() - startTime) / 1000)}s elapsed)`);
     
     // Wait before next poll
     await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
   }
   
   console.error(`Asset ${asset} processing timed out after ${maxWaitMs}ms`);
-  return false;
+  return { ready: false, error: 'Processing timed out' };
 }
 
 async function fetchMediaBuffer(url: string): Promise<Buffer> {
@@ -280,7 +293,10 @@ export async function postToLinkedIn(
           }
           
           // Process media with ffmpeg if available (skip if already combined)
-          if (ffmpegAvailable && !combinedVideoBuffer) {
+          // Also skip if the video is already a pre-combined video (from our fix-failed-post script)
+          const isPreCombinedVideo = item.type === 'video' && item.url?.includes('/combined/');
+          
+          if (ffmpegAvailable && !combinedVideoBuffer && !isPreCombinedVideo) {
             if (item.type === 'video') {
               console.log(`Converting video to LinkedIn-compatible format (MP4 H.264)...`);
               const processed = await processVideoForLinkedIn(fileBuffer, filename);
@@ -294,6 +310,8 @@ export async function postToLinkedIn(
               filename = processed.filename;
               console.log(`Image processed: ${filename} (${(fileBuffer.length / 1024).toFixed(2)}KB)`);
             }
+          } else if (isPreCombinedVideo) {
+            console.log(`Video is already pre-combined and processed, skipping re-encoding`);
           } else if (ffmpegAvailable && item.type === 'image') {
             // Still process images even when we have a combined video
             console.log(`Optimizing image for LinkedIn...`);
@@ -319,12 +337,12 @@ export async function postToLinkedIn(
           // For videos, wait for processing to complete
           if (item.type === 'video') {
             console.log('Waiting for LinkedIn video processing...');
-            const isReady = await waitForAssetReady(user.linkedinAccessToken, asset);
-            if (!isReady) {
-              console.error('Video processing failed or timed out');
+            const result = await waitForAssetReady(user.linkedinAccessToken, asset);
+            if (!result.ready) {
+              console.error('Video processing failed or timed out:', result.error);
               return { 
                 success: false, 
-                error: 'LinkedIn video processing failed. The video may be corrupted or in an unsupported format.' 
+                error: `LinkedIn video processing failed: ${result.error || 'Unknown error. The video may be corrupted or in an unsupported format.'}` 
               };
             }
             console.log('LinkedIn video processing complete');
