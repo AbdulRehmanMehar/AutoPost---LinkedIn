@@ -78,7 +78,9 @@ export async function PUT(
       const result = await postToLinkedIn(
         session.user.email, 
         content || post.content,
-        post.media || []
+        post.media || [],
+        post.postAs || 'person',
+        post.organizationId
       );
       
       post.content = content || post.content;

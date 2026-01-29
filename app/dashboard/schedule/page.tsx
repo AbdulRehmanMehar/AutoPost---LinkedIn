@@ -1,0 +1,173 @@
+'use client';
+
+import { useEffect, useState } from 'react';
+import Link from 'next/link';
+import ScheduleOptimizer from '@/components/schedule-optimizer';
+
+interface Page {
+  _id: string;
+  name: string;
+  connections: {
+    platform: string;
+    platformUsername: string;
+    isActive: boolean;
+  }[];
+}
+
+export default function SchedulePage() {
+  const [pages, setPages] = useState<Page[]>([]);
+  const [selectedPageId, setSelectedPageId] = useState<string>('');
+  const [isLoading, setIsLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchPages = async () => {
+      try {
+        const response = await fetch('/api/pages');
+        if (response.ok) {
+          const data = await response.json();
+          setPages(data.pages || []);
+          if (data.pages?.length === 1) {
+            setSelectedPageId(data.pages[0]._id);
+          }
+        }
+      } catch {
+        console.error('Failed to fetch pages');
+      } finally {
+        setIsLoading(false);
+      }
+    };
+    fetchPages();
+  }, []);
+
+  const selectedPage = pages.find(p => p._id === selectedPageId);
+  const activeConnections = selectedPage?.connections.filter(c => c.isActive) || [];
+
+  return (
+    <div className="min-h-screen bg-gray-900 p-8">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <div className="flex items-center gap-4 mb-2">
+              <Link
+                href="/dashboard"
+                className="text-gray-400 hover:text-white text-sm"
+              >
+                ← Dashboard
+              </Link>
+            </div>
+            <h1 className="text-3xl font-bold text-white">Schedule Optimization</h1>
+            <p className="text-gray-400 mt-1">
+              Let AI analyze your engagement data and find the best times to post
+            </p>
+          </div>
+        </div>
+
+        {/* Page Selector */}
+        {!isLoading && pages.length > 0 && (
+          <div className="mb-6">
+            <label className="block text-sm font-medium text-gray-300 mb-2">
+              Select Page to Analyze
+            </label>
+            <select
+              value={selectedPageId}
+              onChange={(e) => setSelectedPageId(e.target.value)}
+              className="w-full max-w-md bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-white focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All pages (aggregated)</option>
+              {pages.map((page) => (
+                <option key={page._id} value={page._id}>
+                  {page.name}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
+        {/* Connected Platforms Summary */}
+        {selectedPage && (
+          <div className="mb-6 p-4 bg-gray-800 rounded-lg">
+            <h3 className="text-sm font-medium text-gray-300 mb-2">Active Platforms</h3>
+            <div className="flex flex-wrap gap-2">
+              {activeConnections.length === 0 ? (
+                <p className="text-gray-500 text-sm">No active connections</p>
+              ) : (
+                activeConnections.map((conn) => (
+                  <div
+                    key={conn.platform}
+                    className={`px-3 py-1 rounded-full text-sm ${
+                      conn.platform === 'linkedin'
+                        ? 'bg-blue-600/30 text-blue-300'
+                        : conn.platform === 'facebook'
+                        ? 'bg-blue-700/30 text-blue-300'
+                        : conn.platform === 'twitter'
+                        ? 'bg-sky-500/30 text-sky-300'
+                        : 'bg-gray-600/30 text-gray-300'
+                    }`}
+                  >
+                    {conn.platform.charAt(0).toUpperCase() + conn.platform.slice(1)}: {conn.platformUsername}
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Loading State */}
+        {isLoading && (
+          <div className="text-center py-12">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto"></div>
+            <p className="text-gray-400 mt-4">Loading...</p>
+          </div>
+        )}
+
+        {/* No Pages State */}
+        {!isLoading && pages.length === 0 && (
+          <div className="bg-gray-800 rounded-lg p-12 text-center">
+            <div className="text-6xl mb-4">📄</div>
+            <h2 className="text-xl font-bold text-white mb-2">No Pages Found</h2>
+            <p className="text-gray-400 mb-6">
+              Create a page and connect some platforms to start optimizing your schedule.
+            </p>
+            <Link
+              href="/dashboard"
+              className="inline-block px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-500 transition-colors"
+            >
+              Go to Dashboard
+            </Link>
+          </div>
+        )}
+
+        {/* Schedule Optimizer */}
+        {!isLoading && pages.length > 0 && (
+          <ScheduleOptimizer pageId={selectedPageId || undefined} />
+        )}
+
+        {/* Tips Section */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+            <div className="text-2xl mb-2">📈</div>
+            <h3 className="font-medium text-white mb-1">More Data = Better Insights</h3>
+            <p className="text-sm text-gray-400">
+              The AI analyzes your historical engagement data. More posts = more accurate recommendations.
+            </p>
+          </div>
+          <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+            <div className="text-2xl mb-2">🔄</div>
+            <h3 className="font-medium text-white mb-1">Re-analyze Regularly</h3>
+            <p className="text-sm text-gray-400">
+              Audience behavior changes over time. Run analysis monthly for best results.
+            </p>
+          </div>
+          <div className="p-4 bg-gray-800/50 rounded-lg border border-gray-700">
+            <div className="text-2xl mb-2">🎯</div>
+            <h3 className="font-medium text-white mb-1">Platform-Specific Times</h3>
+            <p className="text-sm text-gray-400">
+              Each platform has unique peak times. The AI considers this for cross-platform optimization.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

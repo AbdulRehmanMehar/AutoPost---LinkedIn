@@ -17,6 +17,8 @@ echo "Writing scheduler env..."
 mkdir -p /var/log
 : > /var/log/cron-publish.log
 : > /var/log/cron-engage.log
+: > /var/log/cron-auto-generate.log
+: > /var/log/cron-collect-metrics.log
 
 CRONTAB=/etc/crontabs/root
 # Keep the default Alpine periodic entries, just append ours once.
@@ -25,6 +27,12 @@ if ! grep -q "/scheduler/cron-call.sh publish" "$CRONTAB" 2>/dev/null; then
 fi
 if ! grep -q "/scheduler/cron-call.sh engage" "$CRONTAB" 2>/dev/null; then
   echo "*/15 * * * * sh /scheduler/cron-call.sh engage >> /var/log/cron-engage.log 2>&1" >> "$CRONTAB"
+fi
+if ! grep -q "/scheduler/cron-call.sh auto-generate" "$CRONTAB" 2>/dev/null; then
+  echo "0 6 * * * sh /scheduler/cron-call.sh auto-generate >> /var/log/cron-auto-generate.log 2>&1" >> "$CRONTAB"
+fi
+if ! grep -q "/scheduler/cron-call.sh collect-metrics" "$CRONTAB" 2>/dev/null; then
+  echo "0 */6 * * * sh /scheduler/cron-call.sh collect-metrics >> /var/log/cron-collect-metrics.log 2>&1" >> "$CRONTAB"
 fi
 
 echo "Cron jobs installed:"

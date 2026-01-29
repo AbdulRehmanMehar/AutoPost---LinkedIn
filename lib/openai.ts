@@ -1,9 +1,14 @@
 import OpenAI from 'openai';
 import { StructuredInput } from './models/Post';
 
+// Use Groq's OpenAI-compatible API
 const openai = new OpenAI({
-  apiKey: process.env.O_API_KEY ?? process.env.OPENAI_API_KEY,
+  apiKey: process.env.GROQ_API_KEY,
+  baseURL: 'https://api.groq.com/openai/v1',
 });
+
+// Groq model - fast and high quality
+const AI_MODEL = 'llama-3.3-70b-versatile';
 
 const LINKEDIN_POST_SYSTEM_PROMPT = `You are an expert LinkedIn content creator who writes posts that perform well and build credibility. You write as an individual builder/professional, NOT as a company or marketing team.
 
@@ -105,6 +110,25 @@ export interface GeneratePostOptions {
   targetAudience?: string;
 }
 
+// Page content strategy interface for multi-page support
+export interface PageContentStrategy {
+  persona: string;
+  topics: string[];
+  tone: string;
+  targetAudience: string;
+  postingFrequency: number;
+  preferredAngles: string[];
+  avoidTopics?: string[];
+  customInstructions?: string;
+}
+
+export interface GenerateWithStrategyOptions {
+  strategy: PageContentStrategy;
+  topic?: string; // Optional specific topic to write about
+  angle?: string; // Optional specific angle to use
+  inspiration?: string; // Optional content inspiration (e.g., from blog)
+}
+
 export async function generateLinkedInPost(options: GeneratePostOptions): Promise<string> {
   const { mode, structuredInput, aiPrompt, tone = 'professional', includeEmojis = true, includeHashtags = true, targetAudience } = options;
 
@@ -119,7 +143,7 @@ export async function generateLinkedInPost(options: GeneratePostOptions): Promis
   }
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: AI_MODEL,
     messages: [
       { role: 'system', content: LINKEDIN_POST_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
@@ -234,7 +258,7 @@ function buildAIPrompt(
 
 export async function improvePost(content: string, instructions: string): Promise<string> {
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: AI_MODEL,
     messages: [
       { role: 'system', content: LINKEDIN_POST_SYSTEM_PROMPT },
       {
@@ -258,6 +282,116 @@ Please provide the improved version only, without any explanations.`,
   }
 
   return improvedContent.trim();
+}
+
+// ============================================
+// Page Strategy-Based Content Generation
+// ============================================
+
+const POST_ANGLE_DESCRIPTIONS: Record<string, string> = {
+  problem_recognition: 'Focus on identifying and articulating a problem your audience faces. Make them feel seen and understood.',
+  war_story: 'Share a personal experience or lesson learned from building/working. Be specific and honest about what happened.',
+  opinionated_take: 'Take a strong stance on something in your industry. Be specific and back it up with reasoning.',
+  insight: 'Share a useful observation or tip that your audience might not have considered. Be educational.',
+  how_to: 'Provide a step-by-step approach or framework for solving a problem. Be practical and actionable.',
+  case_study: 'Share a specific example with real results. Include numbers or concrete outcomes where possible.',
+};
+
+/**
+ * Generate a LinkedIn post using a page's content strategy
+ */
+export async function generatePostWithStrategy(options: GenerateWithStrategyOptions): Promise<{
+  content: string;
+  angle: string;
+  topic: string;
+}> {
+  const { strategy, topic, angle, inspiration } = options;
+
+  // Pick a random topic if not specified
+  const selectedTopic = topic || (strategy.topics.length > 0 
+    ? strategy.topics[Math.floor(Math.random() * strategy.topics.length)] 
+    : 'general industry insights');
+
+  // Pick a random angle if not specified
+  const selectedAngle = angle || (strategy.preferredAngles.length > 0
+    ? strategy.preferredAngles[Math.floor(Math.random() * strategy.preferredAngles.length)]
+    : 'insight');
+
+  const angleDescription = POST_ANGLE_DESCRIPTIONS[selectedAngle] || 'Share valuable insights';
+
+  const parts: string[] = [
+    'Generate a LinkedIn post based on the following content strategy:',
+    '',
+    '## Your Voice & Persona:',
+    strategy.persona,
+    '',
+    '## Target Audience:',
+    strategy.targetAudience,
+    '',
+    '## Tone:',
+    strategy.tone,
+    '',
+    '## Topic for this post:',
+    selectedTopic,
+    '',
+    '## Post Angle:',
+    `${selectedAngle}: ${angleDescription}`,
+  ];
+
+  if (inspiration) {
+    parts.push('');
+    parts.push('## Source Material/Inspiration:');
+    parts.push(inspiration);
+  }
+
+  if (strategy.avoidTopics && strategy.avoidTopics.length > 0) {
+    parts.push('');
+    parts.push('## Topics to AVOID:');
+    parts.push(strategy.avoidTopics.join(', '));
+  }
+
+  if (strategy.customInstructions) {
+    parts.push('');
+    parts.push('## Additional Instructions:');
+    parts.push(strategy.customInstructions);
+  }
+
+  parts.push('');
+  parts.push('## Requirements:');
+  parts.push('- Keep under 1200 characters (aim for 900-1100)');
+  parts.push('- Write authentically in the persona described above');
+  parts.push('- Match the tone exactly');
+  parts.push('- Use the specified angle to structure the post');
+  parts.push('- End with a specific question that invites discussion');
+  parts.push('- Include 3-5 relevant hashtags at the end');
+  parts.push('- Use 0-1 emoji (less is more for credibility)');
+  parts.push('- NEVER use em dashes (—). Use commas or periods instead');
+  parts.push('- Use contractions naturally (don\'t, it\'s, that\'s)');
+  parts.push('- Vary sentence length');
+
+  const userPrompt = parts.join('\n');
+
+  const response = await openai.chat.completions.create({
+    model: AI_MODEL,
+    messages: [
+      { role: 'system', content: LINKEDIN_POST_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.8, // Slightly higher for more variety
+    max_tokens: 1000,
+  });
+
+  const content = response.choices[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('Failed to generate content');
+  }
+
+  return {
+    content: content.trim(),
+    angle: selectedAngle,
+    topic: selectedTopic,
+  };
 }
 
 // ============================================
@@ -356,7 +490,7 @@ Requirements:
 Return ONLY the comment text, nothing else.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: AI_MODEL,
     messages: [
       { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
@@ -411,7 +545,7 @@ Requirements:
 Return ONLY the reply text, nothing else.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: AI_MODEL,
     messages: [
       { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
@@ -465,7 +599,7 @@ Requirements for EACH comment:
 Return ONLY the ${count} comments, each on its own line, numbered 1-${count}. No other text.`;
 
   const response = await openai.chat.completions.create({
-    model: 'gpt-4o',
+    model: AI_MODEL,
     messages: [
       { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
@@ -488,3 +622,611 @@ Return ONLY the ${count} comments, each on its own line, numbered 1-${count}. No
 
   return comments.slice(0, count);
 }
+
+// ============================================
+// AI Analysis & Scoring System
+// ============================================
+
+import type { AIAnalysis, PostAngle, RiskLevel } from './models/Post';
+
+// Re-export types for external use
+export type { PostAngle, RiskLevel };
+
+const ANALYSIS_SYSTEM_PROMPT = `You are an expert at analyzing LinkedIn content for engagement potential and risk assessment. You provide structured analysis in JSON format.
+
+Risk Levels:
+- LOW: Proven themes, educational content, no controversy, safe insights
+- MEDIUM: Opinion-based, links to external pages, personal stories
+- HIGH: Strong opinions, controversial takes, new narratives, criticism
+
+Post Angles:
+- problem_recognition: Posts that highlight problems founders face
+- war_story: Personal experiences, lessons learned, failures
+- opinionated_take: Strong stance on industry topics
+- insight: Educational insights, tips, observations
+- how_to: Step-by-step guides, tutorials
+- case_study: Specific examples with results`;
+
+export interface PostAnalysis extends AIAnalysis {
+  suggestedImprovements?: string[];
+  alternativeAngles?: string[];
+}
+
+/**
+ * Analyze a post for confidence, risk, and engagement potential
+ */
+export async function analyzePost(content: string, includesLink: boolean = false): Promise<PostAnalysis> {
+  const userPrompt = `Analyze this LinkedIn post and return a JSON object:
+
+Post:
+"""
+${content}
+"""
+
+Post includes external link: ${includesLink}
+
+Return ONLY valid JSON with this structure:
+{
+  "confidence": <number 0-1, how likely this will perform well>,
+  "riskLevel": "<low|medium|high>",
+  "riskReasons": ["<reason1>", "<reason2>"],
+  "angle": "<problem_recognition|war_story|opinionated_take|insight|how_to|case_study>",
+  "estimatedEngagement": "<low|medium|high>",
+  "suggestedTiming": "<best posting time suggestion>",
+  "aiReasoning": "<one sentence explaining the confidence score>",
+  "suggestedImprovements": ["<improvement1>", "<improvement2>"],
+  "alternativeAngles": ["<angle1>", "<angle2>"]
+}`;
+
+  const response = await openai.chat.completions.create({
+    model: AI_MODEL,
+    messages: [
+      { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.3,
+    max_tokens: 500,
+  });
+
+  const responseContent = response.choices[0]?.message?.content;
+
+  if (!responseContent) {
+    throw new Error('Failed to analyze post');
+  }
+
+  try {
+    // Extract JSON from response (handle markdown code blocks)
+    const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON found in response');
+    }
+    return JSON.parse(jsonMatch[0]) as PostAnalysis;
+  } catch {
+    // Return default analysis if parsing fails
+    return {
+      confidence: 0.5,
+      riskLevel: 'medium',
+      riskReasons: ['Could not analyze'],
+      angle: 'insight',
+      estimatedEngagement: 'medium',
+      aiReasoning: 'Analysis unavailable',
+    };
+  }
+}
+
+/**
+ * Determine if a post requires human approval based on analysis
+ */
+export function requiresApproval(analysis: AIAnalysis, includesLink: boolean): boolean {
+  // Always require approval for:
+  // 1. High risk posts
+  // 2. Posts with links (per system.md: only 1 in 3 should have links)
+  // 3. Low confidence posts
+  // 4. Opinionated takes
+  
+  if (analysis.riskLevel === 'high') return true;
+  if (includesLink) return true;
+  if (analysis.confidence < 0.7) return true;
+  if (analysis.angle === 'opinionated_take') return true;
+  
+  return false;
+}
+
+// ============================================
+// Blog Analyzer & Repurposing
+// ============================================
+
+const BLOG_ANALYZER_PROMPT = `You are an expert at extracting LinkedIn post angles from blog content. You identify key insights that can be repurposed into multiple engaging posts.
+
+Your job is to:
+1. Identify the core insights and takeaways
+2. Generate multiple post angles (problem recognition, war stories, opinionated takes, how-tos)
+3. Each angle should be a different perspective on the same content
+4. Focus on what would resonate with founders and decision-makers`;
+
+export interface BlogAnalysis {
+  title: string;
+  summary: string;
+  keyInsights: string[];
+  postAngles: {
+    angle: PostAngle;
+    hook: string;
+    outline: string;
+  }[];
+  suggestedPostCount: number;
+}
+
+/**
+ * Analyze a blog post and extract multiple LinkedIn post angles
+ */
+export async function analyzeBlog(blogContent: string, blogUrl?: string): Promise<BlogAnalysis> {
+  const userPrompt = `Analyze this blog content and extract LinkedIn post opportunities:
+
+${blogUrl ? `URL: ${blogUrl}\n` : ''}
+Content:
+"""
+${blogContent.slice(0, 8000)} ${blogContent.length > 8000 ? '... [truncated]' : ''}
+"""
+
+Return ONLY valid JSON:
+{
+  "title": "<detected blog title>",
+  "summary": "<2-3 sentence summary>",
+  "keyInsights": ["<insight1>", "<insight2>", "<insight3>"],
+  "postAngles": [
+    {
+      "angle": "<problem_recognition|war_story|opinionated_take|insight|how_to|case_study>",
+      "hook": "<compelling opening line for this angle>",
+      "outline": "<brief outline of what this post would cover>"
+    }
+  ],
+  "suggestedPostCount": <recommended number of posts from this blog, usually 2-4>
+}`;
+
+  const response = await openai.chat.completions.create({
+    model: AI_MODEL,
+    messages: [
+      { role: 'system', content: BLOG_ANALYZER_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.5,
+    max_tokens: 1500,
+  });
+
+  const responseContent = response.choices[0]?.message?.content;
+
+  if (!responseContent) {
+    throw new Error('Failed to analyze blog');
+  }
+
+  try {
+    const jsonMatch = responseContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON found in response');
+    }
+    return JSON.parse(jsonMatch[0]) as BlogAnalysis;
+  } catch {
+    throw new Error('Failed to parse blog analysis');
+  }
+}
+
+/**
+ * Generate a LinkedIn post from a specific blog angle
+ */
+export async function generatePostFromBlogAngle(
+  blogContent: string,
+  angle: PostAngle,
+  hook: string,
+  outline: string,
+  options: {
+    includeLink?: boolean;
+    linkUrl?: string;
+    tone?: 'professional' | 'casual' | 'inspirational' | 'educational';
+  } = {}
+): Promise<{ content: string; analysis: PostAnalysis }> {
+  const { includeLink = false, linkUrl, tone = 'professional' } = options;
+
+  const userPrompt = `Write a LinkedIn post based on this blog content, using the specified angle:
+
+Blog content (for context):
+"""
+${blogContent.slice(0, 4000)}
+"""
+
+Post angle: ${angle}
+Hook to use: "${hook}"
+Outline: ${outline}
+Tone: ${tone}
+${includeLink && linkUrl ? `Include this link naturally: ${linkUrl}` : 'Do NOT include any links'}
+
+Requirements:
+- Start with or build from the provided hook
+- Keep under 1200 characters (aim for 900-1100)
+- Write as "I" - a builder sharing insights
+- End with a specific question for discussion
+- AVOID: empowering, revolutionizing, seamlessly, game-changing
+- Use 0-1 emoji max
+- Add 3-5 relevant hashtags at the end
+
+Return ONLY the post content, nothing else.`;
+
+  const response = await openai.chat.completions.create({
+    model: AI_MODEL,
+    messages: [
+      { role: 'system', content: LINKEDIN_POST_SYSTEM_PROMPT },
+      { role: 'user', content: userPrompt },
+    ],
+    temperature: 0.7,
+    max_tokens: 1000,
+  });
+
+  const content = response.choices[0]?.message?.content;
+
+  if (!content) {
+    throw new Error('Failed to generate post from blog');
+  }
+
+  const postContent = content.trim();
+  const analysis = await analyzePost(postContent, includeLink);
+
+  return { content: postContent, analysis };
+}
+
+// ============================================
+// Enhanced Post Generation with Analysis
+// ============================================
+
+export interface GeneratePostWithAnalysisOptions extends GeneratePostOptions {
+  includeLink?: boolean;
+  linkUrl?: string;
+}
+
+export interface GeneratedPostWithAnalysis {
+  content: string;
+  analysis: PostAnalysis;
+  requiresApproval: boolean;
+}
+
+/**
+ * Generate a LinkedIn post with automatic analysis and approval determination
+ */
+export async function generateLinkedInPostWithAnalysis(
+  options: GeneratePostWithAnalysisOptions
+): Promise<GeneratedPostWithAnalysis> {
+  const { includeLink = false } = options;
+  
+  // Generate the post
+  const content = await generateLinkedInPost(options);
+  
+  // Analyze it
+  const analysis = await analyzePost(content, includeLink);
+  
+  // Determine if approval is needed
+  const needsApproval = requiresApproval(analysis, includeLink);
+  
+  return {
+    content,
+    analysis,
+    requiresApproval: needsApproval,
+  };
+}
+
+// ============================================
+// Multi-Platform Content Adaptation
+// ============================================
+
+import { PlatformType, PLATFORM_CONFIGS } from './platforms/types';
+
+const PLATFORM_SYSTEM_PROMPTS: Record<PlatformType, string> = {
+  linkedin: LINKEDIN_POST_SYSTEM_PROMPT,
+  
+  facebook: `You are an expert Facebook content creator who writes engaging posts for business pages. You write in a friendly, approachable tone while maintaining professionalism.
+
+## Core Principles:
+
+1. **Friendly and conversational**
+   - Use a warm, welcoming tone
+   - Speak directly to your audience ("you", "your")
+   - Be relatable and human
+   - Okay to be more casual than LinkedIn
+
+2. **Keep it engaging**
+   - Aim for 100-500 characters for best engagement
+   - Can go longer for storytelling (up to 1000 characters)
+   - Front-load the interesting part
+   - Use line breaks for readability
+
+3. **Visual-first mindset**
+   - Facebook is highly visual - write to complement images/videos
+   - If no media, paint a picture with words
+   - Emojis work better here than LinkedIn (2-4 is fine)
+
+4. **Encourage interaction**
+   - Ask questions that are easy to answer
+   - Use polls, reactions, or simple choices
+   - Make commenting feel low-effort
+   - Example: "Coffee or tea while working? ☕🍵"
+
+5. **Hashtags - use sparingly**
+   - 0-3 hashtags max (unlike LinkedIn)
+   - Only use relevant, popular tags
+   - Often better without hashtags on Facebook
+
+6. **Tone flexibility**
+   - Match the content type (fun, informative, inspiring)
+   - Behind-the-scenes content works great
+   - Celebrate milestones and team moments
+   - Share industry news with your take`,
+
+  twitter: `You are an expert Twitter/X content creator who writes punchy, engaging tweets that get engagement.
+
+## Core Principles:
+
+1. **Extreme brevity is key**
+   - 280 characters max, aim for 200 or less
+   - One clear thought per tweet
+   - Every word must earn its place
+
+2. **Hook immediately**
+   - No preamble - get to the point
+   - Strong opinions work
+   - Counterintuitive takes get engagement
+   - Questions work well
+
+3. **Writing style**
+   - Short sentences. Fragments okay.
+   - Use line breaks strategically
+   - Contractions always (don't, won't, it's)
+   - No corporate speak
+
+4. **Hashtags - minimal**
+   - 1-2 hashtags max, or none
+   - Don't hashtag common words
+   - Put hashtags at end, not inline
+
+5. **Engagement tactics**
+   - Ask for opinions
+   - Make bold statements
+   - Share quick tips
+   - React to trending topics
+
+6. **Avoid**
+   - Threads in a single tweet (save for thread format)
+   - Too many emojis
+   - Asking for retweets explicitly
+   - Over-explaining`,
+
+  instagram: `You are an expert Instagram content creator who writes compelling captions that complement visual content.
+
+## Core Principles:
+
+1. **Caption structure**
+   - Strong first line (only ~125 chars show before "more")
+   - Tell a story or share context
+   - Can be longer (up to 2200 chars) but front-load value
+   - End with a call-to-action or question
+
+2. **Tone**
+   - Authentic and personal
+   - Behind-the-scenes feels work great
+   - Inspirational but not preachy
+   - Match your brand voice
+
+3. **Hashtag strategy**
+   - 5-15 relevant hashtags
+   - Mix popular and niche tags
+   - Put in caption or first comment
+   - Research what's working in your niche
+
+4. **Engagement**
+   - Ask questions in captions
+   - Use CTAs: "Double tap if you agree"
+   - Encourage saves: "Save this for later"
+   - Reply to comments quickly
+
+5. **Emoji use**
+   - Emojis work well on Instagram
+   - Use to break up text
+   - Match your brand personality
+   - Don't overdo it
+
+6. **Content types**
+   - Educational carousels need clear captions
+   - Reels need hook + context
+   - Stories can be more casual
+   - Feed posts should be polished`,
+};
+
+export interface AdaptedContent {
+  platform: PlatformType;
+  content: string;
+  hashtags: string[];
+  charCount: number;
+  adaptedAt: Date;
+}
+
+export interface AdaptContentOptions {
+  originalContent: string;
+  targetPlatform: PlatformType;
+  preserveHashtags?: boolean; // Keep original hashtags or adapt them
+  customInstructions?: string;
+}
+
+/**
+ * Adapt content from one platform format to another
+ */
+export async function adaptContentForPlatform(
+  options: AdaptContentOptions
+): Promise<AdaptedContent> {
+  const { originalContent, targetPlatform, preserveHashtags = false, customInstructions } = options;
+  
+  const platformConfig = PLATFORM_CONFIGS[targetPlatform];
+  const systemPrompt = PLATFORM_SYSTEM_PROMPTS[targetPlatform];
+  
+  const parts: string[] = [
+    'Adapt the following content for ' + targetPlatform.charAt(0).toUpperCase() + targetPlatform.slice(1) + ':',
+    '',
+    '## Original Content:',
+    originalContent,
+    '',
+    '## Platform Requirements:',
+    `- Maximum ${platformConfig.maxCharacters} characters`,
+    `- Hashtag strategy: ${platformConfig.hashtagStrategy} (${platformConfig.recommendedHashtags.min}-${platformConfig.recommendedHashtags.max} hashtags)`,
+    `- Tone: ${platformConfig.tonePreference}`,
+    '',
+    '## Instructions:',
+    '- Maintain the core message and insights',
+    '- Adapt the tone and style for ' + targetPlatform,
+    '- Adjust length appropriately',
+    preserveHashtags ? '- Keep the same hashtags from the original' : '- Create platform-appropriate hashtags',
+    '- Make it feel native to ' + targetPlatform + ', not cross-posted',
+  ];
+  
+  if (customInstructions) {
+    parts.push('');
+    parts.push('## Additional Instructions:');
+    parts.push(customInstructions);
+  }
+  
+  parts.push('');
+  parts.push('Return ONLY the adapted content, nothing else.');
+  
+  const response = await openai.chat.completions.create({
+    model: AI_MODEL,
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: parts.join('\n') },
+    ],
+    temperature: 0.7,
+    max_tokens: Math.min(platformConfig.maxCharacters * 2, 2000),
+  });
+  
+  const content = response.choices[0]?.message?.content;
+  
+  if (!content) {
+    throw new Error('Failed to adapt content for ' + targetPlatform);
+  }
+  
+  const adaptedContent = content.trim();
+  
+  // Extract hashtags from the adapted content
+  const hashtagRegex = /#[\w]+/g;
+  const hashtags = adaptedContent.match(hashtagRegex) || [];
+  
+  return {
+    platform: targetPlatform,
+    content: adaptedContent,
+    hashtags,
+    charCount: adaptedContent.length,
+    adaptedAt: new Date(),
+  };
+}
+
+/**
+ * Adapt content for multiple platforms at once
+ */
+export async function adaptContentForMultiplePlatforms(
+  originalContent: string,
+  targetPlatforms: PlatformType[],
+  options?: {
+    preserveHashtags?: boolean;
+    customInstructions?: Record<PlatformType, string>;
+  }
+): Promise<AdaptedContent[]> {
+  const results: AdaptedContent[] = [];
+  
+  // Process platforms in parallel for efficiency
+  const adaptations = await Promise.all(
+    targetPlatforms.map(platform =>
+      adaptContentForPlatform({
+        originalContent,
+        targetPlatform: platform,
+        preserveHashtags: options?.preserveHashtags,
+        customInstructions: options?.customInstructions?.[platform],
+      })
+    )
+  );
+  
+  return adaptations;
+}
+
+export interface GenerateMultiPlatformPostOptions extends GenerateWithStrategyOptions {
+  targetPlatforms: PlatformType[];
+  primaryPlatform?: PlatformType; // Which platform to optimize for initially
+  adaptContent?: boolean; // Whether to adapt for other platforms
+}
+
+export interface MultiPlatformPostResult {
+  primaryContent: string;
+  angle: string;
+  topic: string;
+  platformVersions: AdaptedContent[];
+}
+
+/**
+ * Generate a post optimized for one platform and adapted for others
+ */
+export async function generateMultiPlatformPost(
+  options: GenerateMultiPlatformPostOptions
+): Promise<MultiPlatformPostResult> {
+  const { 
+    strategy, 
+    topic, 
+    angle, 
+    inspiration,
+    targetPlatforms,
+    primaryPlatform = 'linkedin',
+    adaptContent = true 
+  } = options;
+  
+  // Generate the primary content (default to LinkedIn style)
+  const primary = await generatePostWithStrategy({
+    strategy,
+    topic,
+    angle,
+    inspiration,
+  });
+  
+  // If we only have one platform or don't want to adapt, return early
+  if (!adaptContent || targetPlatforms.length <= 1) {
+    return {
+      primaryContent: primary.content,
+      angle: primary.angle,
+      topic: primary.topic,
+      platformVersions: [{
+        platform: primaryPlatform,
+        content: primary.content,
+        hashtags: (primary.content.match(/#[\w]+/g) || []),
+        charCount: primary.content.length,
+        adaptedAt: new Date(),
+      }],
+    };
+  }
+  
+  // Adapt for other platforms
+  const otherPlatforms = targetPlatforms.filter(p => p !== primaryPlatform);
+  const adaptedVersions = await adaptContentForMultiplePlatforms(
+    primary.content,
+    otherPlatforms
+  );
+  
+  // Add the primary platform version
+  const allVersions: AdaptedContent[] = [
+    {
+      platform: primaryPlatform,
+      content: primary.content,
+      hashtags: (primary.content.match(/#[\w]+/g) || []),
+      charCount: primary.content.length,
+      adaptedAt: new Date(),
+    },
+    ...adaptedVersions,
+  ];
+  
+  return {
+    primaryContent: primary.content,
+    angle: primary.angle,
+    topic: primary.topic,
+    platformVersions: allVersions,
+  };
+}
+

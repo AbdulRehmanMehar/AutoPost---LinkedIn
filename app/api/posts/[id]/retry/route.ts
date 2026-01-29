@@ -40,7 +40,13 @@ export async function POST(
 
     // Attempt to publish to LinkedIn
     console.log(`Retrying publication for post ${id}`);
-    const result = await postToLinkedIn(session.user.email, post.content, post.media || []);
+    const result = await postToLinkedIn(
+      session.user.email, 
+      post.content, 
+      post.media || [],
+      post.postAs || 'person',
+      post.organizationId
+    );
 
     if (result.success) {
       post.status = 'published';

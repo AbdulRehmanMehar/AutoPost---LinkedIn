@@ -18,6 +18,8 @@ import {
   Wand2,
   Image,
   Video,
+  Building2,
+  User,
 } from 'lucide-react';
 
 interface MediaItem {
@@ -29,14 +31,16 @@ interface MediaItem {
 
 interface Post {
   _id: string;
-  mode?: 'manual' | 'structured' | 'ai';
+  mode?: 'manual' | 'structured' | 'ai' | 'blog_repurpose';
   content: string;
   media?: MediaItem[];
-  status: 'draft' | 'scheduled' | 'published' | 'failed';
+  status: 'draft' | 'pending_approval' | 'scheduled' | 'published' | 'partially_published' | 'failed' | 'rejected';
   scheduledFor?: string;
   publishedAt?: string;
   createdAt: string;
   error?: string;
+  postAs?: 'person' | 'organization';
+  organizationName?: string;
 }
 
 interface PostCardProps {
@@ -49,6 +53,11 @@ const statusConfig = {
     icon: Edit,
     className: 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300',
   },
+  pending_approval: {
+    label: 'Pending Approval',
+    icon: Clock,
+    className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
+  },
   scheduled: {
     label: 'Scheduled',
     icon: Clock,
@@ -59,8 +68,18 @@ const statusConfig = {
     icon: CheckCircle,
     className: 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300',
   },
+  partially_published: {
+    label: 'Partially Published',
+    icon: CheckCircle,
+    className: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900 dark:text-yellow-300',
+  },
   failed: {
     label: 'Failed',
+    icon: XCircle,
+    className: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
+  },
+  rejected: {
+    label: 'Rejected',
     icon: XCircle,
     className: 'bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300',
   },
@@ -70,6 +89,7 @@ const modeConfig = {
   manual: { icon: FileText, label: 'Manual' },
   structured: { icon: Sparkles, label: 'Structured' },
   ai: { icon: Wand2, label: 'AI Generated' },
+  blog_repurpose: { icon: Wand2, label: 'Blog Repurpose' },
 };
 
 export function PostCard({ post }: PostCardProps) {
@@ -143,6 +163,24 @@ export function PostCard({ post }: PostCardProps) {
             <span className="inline-flex items-center gap-1 rounded-full bg-purple-100 px-2 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900 dark:text-purple-300">
               <ModeIcon className="h-3 w-3" />
               {mode.label}
+            </span>
+            {/* Post As indicator */}
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+              post.postAs === 'organization' 
+                ? 'bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300'
+                : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
+            }`}>
+              {post.postAs === 'organization' ? (
+                <>
+                  <Building2 className="h-3 w-3" />
+                  {post.organizationName || 'Organization'}
+                </>
+              ) : (
+                <>
+                  <User className="h-3 w-3" />
+                  Personal
+                </>
+              )}
             </span>
             {(imageCount > 0 || videoCount > 0) && (
               <span className="inline-flex items-center gap-1 text-xs text-zinc-500 dark:text-zinc-400">

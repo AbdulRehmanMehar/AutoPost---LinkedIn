@@ -178,8 +178,10 @@ async function fetchMediaBuffer(url: string): Promise<Buffer> {
 export async function postToLinkedIn(
   userId: string,
   content: string,
-  media: MediaItem[] = []
-): Promise<{ success: boolean; postId?: string; error?: string }> {
+  media: MediaItem[] = [],
+  postAs: 'person' | 'organization' = 'person',
+  organizationId?: string
+): Promise<{ success: boolean; postId?: string; postUrl?: string; error?: string }> {
   try {
     await connectToDatabase();
     
@@ -194,7 +196,21 @@ export async function postToLinkedIn(
       return { success: false, error: 'LinkedIn access token expired. Please reconnect.' };
     }
 
-    const personUrn = `urn:li:person:${user.linkedinId}`;
+    // Determine the author URN based on postAs
+    let authorUrn: string;
+    if (postAs === 'organization' && organizationId) {
+      // Validate that user has access to this organization
+      const hasAccess = user.linkedinOrganizations?.some(org => org.id === organizationId);
+      if (!hasAccess) {
+        return { success: false, error: 'You do not have admin access to this organization' };
+      }
+      authorUrn = `urn:li:organization:${organizationId}`;
+      console.log(`Posting as organization: ${authorUrn}`);
+    } else {
+      authorUrn = `urn:li:person:${user.linkedinId}`;
+      console.log(`Posting as person: ${authorUrn}`);
+    }
+
     const uploadedAssets: { asset: string; type: 'image' | 'video'; filename: string }[] = [];
 
     // Check if ffmpeg is available for media processing
@@ -325,7 +341,7 @@ export async function postToLinkedIn(
           
           const { uploadUrl, asset } = await registerMediaUpload(
             user.linkedinAccessToken,
-            personUrn,
+            authorUrn,
             item.type
           );
 
@@ -389,7 +405,7 @@ export async function postToLinkedIn(
     }
 
     const postBody = {
-      author: personUrn,
+      author: authorUrn,
       lifecycleState: 'PUBLISHED',
       specificContent: {
         'com.linkedin.ugc.ShareContent': {
@@ -439,7 +455,8 @@ export async function postToLinkedIn(
     }
 
     const data: LinkedInPostResponse = await response.json();
-    return { success: true, postId: data.id };
+    const postUrl = data.id ? `https://www.linkedin.com/feed/update/${data.id}` : undefined;
+    return { success: true, postId: data.id, postUrl };
   } catch (error) {
     console.error('Error posting to LinkedIn:', error);
     const errorMessage = error instanceof Error ? error.message : 'Failed to post to LinkedIn';

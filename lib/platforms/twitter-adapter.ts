@@ -1,0 +1,461 @@
+import { 
+  IPlatformAdapter, 
+  PlatformConnection, 
+  PlatformContent, 
+  PlatformPublishResult,
+  PlatformMetrics,
+  MediaUploadResult,
+  ContentStrategyInput,
+  PLATFORM_CONFIGS,
+} from './types';
+import { IPlatformConnection } from '../models/Page';
+import { BasePlatformAdapter } from './base-adapter';
+import crypto from 'crypto';
+
+const TWITTER_API_BASE = 'https://api.twitter.com/2';
+
+/**
+ * Generate OAuth 1.0a signature for Twitter API requests
+ * Required for media upload endpoint
+ */
+function generateOAuth1Signature(
+  method: string,
+  url: string,
+  params: Record<string, string>,
+  consumerSecret: string,
+  tokenSecret: string
+): string {
+  // Sort parameters alphabetically
+  const sortedParams = Object.keys(params)
+    .sort()
+    .map(key => `${encodeURIComponent(key)}=${encodeURIComponent(params[key])}`)
+    .join('&');
+
+  // Create signature base string
+  const signatureBase = [
+    method.toUpperCase(),
+    encodeURIComponent(url),
+    encodeURIComponent(sortedParams),
+  ].join('&');
+
+  // Create signing key
+  const signingKey = `${encodeURIComponent(consumerSecret)}&${encodeURIComponent(tokenSecret)}`;
+
+  // Generate HMAC-SHA1 signature
+  const signature = crypto
+    .createHmac('sha1', signingKey)
+    .update(signatureBase)
+    .digest('base64');
+
+  return signature;
+}
+
+/**
+ * Generate OAuth 1.0a header for Twitter API v1.1
+ */
+function generateOAuth1Header(
+  method: string,
+  url: string,
+  connection: IPlatformConnection,
+  additionalParams: Record<string, string> = {}
+): string {
+  const consumerKey = process.env.TWITTER_CONSUMER_KEY || process.env.TWITTER_CLIENT_ID || '';
+  const consumerSecret = process.env.TWITTER_CONSUMER_SECRET || process.env.TWITTER_CLIENT_SECRET || '';
+  const oauthToken = connection.oauthToken || connection.accessToken;
+  const oauthTokenSecret = connection.oauthTokenSecret || '';
+
+  const oauthParams: Record<string, string> = {
+    oauth_consumer_key: consumerKey,
+    oauth_nonce: crypto.randomBytes(16).toString('hex'),
+    oauth_signature_method: 'HMAC-SHA1',
+    oauth_timestamp: Math.floor(Date.now() / 1000).toString(),
+    oauth_token: oauthToken,
+    oauth_version: '1.0',
+    ...additionalParams,
+  };
+
+  // Generate signature
+  const signature = generateOAuth1Signature(
+    method,
+    url,
+    oauthParams,
+    consumerSecret,
+    oauthTokenSecret
+  );
+
+  oauthParams.oauth_signature = signature;
+
+  // Build Authorization header
+  const headerParts = Object.keys(oauthParams)
+    .filter(key => key.startsWith('oauth_'))
+    .sort()
+    .map(key => `${encodeURIComponent(key)}="${encodeURIComponent(oauthParams[key])}"`)
+    .join(', ');
+
+  return `OAuth ${headerParts}`;
+}
+
+/**
+ * Twitter/X Platform Adapter
+ * Handles content adaptation and publishing to Twitter/X
+ */
+class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
+  platform = 'twitter' as const;
+  
+  /**
+   * Adapt content for Twitter's constraints
+   * - Max 280 characters (or 25,000 for Twitter Blue)
+   * - 1-3 hashtags work best
+   * - Casual, punchy tone
+   * - Can include threads for longer content
+   */
+  async adaptContent(
+    baseContent: string, 
+    strategy?: ContentStrategyInput
+  ): Promise<PlatformContent> {
+    const config = PLATFORM_CONFIGS.twitter;
+    
+    // Extract hashtags
+    let hashtags = this.extractHashtags(baseContent);
+    let content = this.removeHashtags(baseContent);
+    
+    // Twitter prefers fewer, more impactful hashtags
+    if (hashtags.length > config.recommendedHashtags.max) {
+      hashtags = hashtags.slice(0, config.recommendedHashtags.max);
+    }
+    
+    // Calculate available space for content
+    const hashtagText = hashtags.length > 0 ? '\n\n' + hashtags.join(' ') : '';
+    const maxContentLength = config.maxCharacters - hashtagText.length;
+    
+    // Truncate if needed, but try to keep it punchy
+    if (content.length > maxContentLength) {
+      content = this.truncateContent(content, maxContentLength - 3) + '...';
+    }
+    
+    // Add hashtags back
+    if (hashtags.length > 0) {
+      content = content + hashtagText;
+    }
+    
+    return {
+      platform: 'twitter',
+      content,
+      hashtags,
+    };
+  }
+
+  /**
+   * Publish to Twitter/X using v2 API
+   */
+  async publish(
+    connection: IPlatformConnection,
+    content: PlatformContent,
+    media?: MediaUploadResult[]
+  ): Promise<PlatformPublishResult> {
+    try {
+      const tweetBody: Record<string, unknown> = {
+        text: content.content,
+      };
+
+      // Add media if present
+      if (media && media.length > 0) {
+        const validMedia = media.filter(m => m.success && m.mediaId);
+        if (validMedia.length > 0) {
+          tweetBody.media = {
+            media_ids: validMedia.map(m => m.mediaId),
+          };
+        }
+      }
+
+      const response = await fetch(`${TWITTER_API_BASE}/tweets`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${connection.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(tweetBody),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        return {
+          platform: 'twitter',
+          connectionId: connection.platformId,
+          success: false,
+          error: error.detail || error.title || `Twitter API error (${response.status})`,
+        };
+      }
+
+      const data = await response.json();
+      const tweetId = data.data?.id;
+      
+      return {
+        platform: 'twitter',
+        connectionId: connection.platformId,
+        success: true,
+        postId: tweetId,
+        postUrl: tweetId ? `https://twitter.com/i/web/status/${tweetId}` : undefined,
+        publishedAt: new Date(),
+      };
+    } catch (error) {
+      return {
+        platform: 'twitter',
+        connectionId: connection.platformId,
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Upload media to Twitter
+   * Note: Twitter v1.1 media upload requires OAuth 1.0a authentication
+   */
+  async uploadMedia(
+    connection: IPlatformConnection,
+    mediaUrl: string,
+    mediaType: 'image' | 'video'
+  ): Promise<MediaUploadResult> {
+    try {
+      // Fetch the media file
+      const mediaResponse = await fetch(mediaUrl);
+      if (!mediaResponse.ok) {
+        throw new Error('Failed to fetch media file');
+      }
+      
+      const mediaBuffer = await mediaResponse.arrayBuffer();
+      const base64Media = Buffer.from(mediaBuffer).toString('base64');
+      const contentType = mediaResponse.headers.get('content-type') || 'image/jpeg';
+      
+      // Twitter uses v1.1 for media upload with OAuth 1.0a
+      const uploadUrl = 'https://upload.twitter.com/1.1/media/upload.json';
+      
+      // Check if we have OAuth 1.0a credentials
+      const hasOAuth1 = connection.oauthToken && connection.oauthTokenSecret;
+      
+      if (hasOAuth1) {
+        // Use OAuth 1.0a authentication
+        const authHeader = generateOAuth1Header('POST', uploadUrl, connection);
+        
+        const formData = new URLSearchParams();
+        formData.append('media_data', base64Media);
+        
+        if (mediaType === 'video') {
+          formData.append('media_category', 'tweet_video');
+        }
+        
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': authHeader,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData.toString(),
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.errors?.[0]?.message || `Twitter media upload failed (${response.status})`);
+        }
+
+        const data = await response.json();
+        
+        // For video, need to wait for processing
+        if (mediaType === 'video' && data.processing_info) {
+          const mediaId = data.media_id_string;
+          const finalResult = await this.waitForMediaProcessing(connection, mediaId);
+          return finalResult;
+        }
+        
+        return {
+          success: true,
+          mediaId: data.media_id_string,
+        };
+      } else {
+        // Fallback: Try with Bearer token (works for some endpoints)
+        // Note: This may not work for media upload, but try anyway
+        const formData = new URLSearchParams();
+        formData.append('media_data', base64Media);
+        
+        const response = await fetch(uploadUrl, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${connection.accessToken}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: formData.toString(),
+        });
+
+        if (!response.ok) {
+          const error = await response.json().catch(() => ({}));
+          // If Bearer auth fails, provide helpful error
+          if (response.status === 401 || response.status === 403) {
+            throw new Error('Twitter media upload requires OAuth 1.0a credentials (oauthToken and oauthTokenSecret)');
+          }
+          throw new Error(error.errors?.[0]?.message || 'Failed to upload media');
+        }
+
+        const data = await response.json();
+        
+        return {
+          success: true,
+          mediaId: data.media_id_string,
+        };
+      }
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Wait for Twitter media processing (for videos)
+   */
+  private async waitForMediaProcessing(
+    connection: IPlatformConnection,
+    mediaId: string,
+    maxAttempts: number = 60
+  ): Promise<MediaUploadResult> {
+    const statusUrl = `https://upload.twitter.com/1.1/media/upload.json?command=STATUS&media_id=${mediaId}`;
+    const hasOAuth1 = connection.oauthToken && connection.oauthTokenSecret;
+    
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const headers: Record<string, string> = hasOAuth1
+          ? { 'Authorization': generateOAuth1Header('GET', statusUrl.split('?')[0], connection) }
+          : { 'Authorization': `Bearer ${connection.accessToken}` };
+        
+        const response = await fetch(statusUrl, { headers });
+        
+        if (!response.ok) {
+          throw new Error(`Status check failed: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        const state = data.processing_info?.state;
+        
+        if (state === 'succeeded') {
+          return { success: true, mediaId };
+        }
+        
+        if (state === 'failed') {
+          const error = data.processing_info?.error?.message || 'Video processing failed';
+          return { success: false, error };
+        }
+        
+        // Still processing, wait and retry
+        const checkAfterSecs = data.processing_info?.check_after_secs || 5;
+        await new Promise(resolve => setTimeout(resolve, checkAfterSecs * 1000));
+      } catch (error) {
+        console.error('Error checking media status:', error);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    }
+    
+    return { success: false, error: 'Media processing timeout' };
+  }
+
+  /**
+   * Fetch tweet metrics
+   */
+  async fetchMetrics(
+    connection: IPlatformConnection,
+    postId: string
+  ): Promise<PlatformMetrics> {
+    try {
+      const response = await fetch(
+        `${TWITTER_API_BASE}/tweets/${postId}?tweet.fields=public_metrics,non_public_metrics,organic_metrics`,
+        {
+          headers: {
+            'Authorization': `Bearer ${connection.accessToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error('Failed to fetch metrics');
+      }
+
+      const data = await response.json();
+      const metrics = data.data?.public_metrics || {};
+      const nonPublic = data.data?.non_public_metrics || {};
+      
+      return {
+        platform: 'twitter',
+        connectionId: connection.platformId,
+        impressions: nonPublic.impression_count || metrics.impression_count,
+        likes: metrics.like_count || 0,
+        comments: metrics.reply_count || 0,
+        shares: metrics.retweet_count + (metrics.quote_count || 0),
+        clicks: nonPublic.url_link_clicks,
+        lastUpdated: new Date(),
+      };
+    } catch (error) {
+      return {
+        platform: 'twitter',
+        connectionId: connection.platformId,
+        lastUpdated: new Date(),
+      };
+    }
+  }
+
+  /**
+   * Refresh OAuth 2.0 token
+   */
+  async refreshToken(connection: PlatformConnection): Promise<{
+    accessToken: string;
+    refreshToken?: string;
+    expiresAt?: Date;
+  }> {
+    if (!connection.refreshToken) {
+      throw new Error('No refresh token available');
+    }
+
+    const response = await fetch('https://api.twitter.com/2/oauth2/token', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Authorization': `Basic ${Buffer.from(
+          `${process.env.TWITTER_CLIENT_ID}:${process.env.TWITTER_CLIENT_SECRET}`
+        ).toString('base64')}`,
+      },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        refresh_token: connection.refreshToken,
+      }).toString(),
+    });
+
+    if (!response.ok) {
+      throw new Error('Failed to refresh token');
+    }
+
+    const data = await response.json();
+    
+    return {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      expiresAt: new Date(Date.now() + data.expires_in * 1000),
+    };
+  }
+
+  /**
+   * Validate Twitter connection
+   */
+  async validateConnection(connection: PlatformConnection): Promise<boolean> {
+    try {
+      const response = await fetch(`${TWITTER_API_BASE}/users/me`, {
+        headers: {
+          'Authorization': `Bearer ${connection.accessToken}`,
+        },
+      });
+      return response.ok;
+    } catch {
+      return false;
+    }
+  }
+}
+
+export const twitterAdapter = new TwitterAdapter();

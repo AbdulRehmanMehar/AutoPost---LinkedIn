@@ -41,6 +41,9 @@ interface CreatePostBody {
   media?: MediaItem[];
   scheduledFor?: string;
   publishNow?: boolean;
+  postAs?: 'person' | 'organization';
+  organizationId?: string;
+  organizationName?: string;
 }
 
 // POST /api/posts - Create a new post
@@ -61,7 +64,10 @@ export async function POST(request: NextRequest) {
       aiPrompt,
       media = [],
       scheduledFor, 
-      publishNow 
+      publishNow,
+      postAs = 'person',
+      organizationId,
+      organizationName,
     } = body;
 
     if (!content || content.trim().length === 0) {
@@ -81,7 +87,7 @@ export async function POST(request: NextRequest) {
 
     // If publishing now, post directly to LinkedIn
     if (publishNow) {
-      const result = await postToLinkedIn(session.user.email, content, media);
+      const result = await postToLinkedIn(session.user.email, content, media, postAs, organizationId);
       
       const post = await Post.create({
         userId: user._id,
@@ -95,6 +101,9 @@ export async function POST(request: NextRequest) {
         publishedAt: result.success ? new Date() : undefined,
         linkedinPostId: result.postId,
         error: result.error,
+        postAs,
+        organizationId,
+        organizationName,
       });
 
       return NextResponse.json(post, { status: 201 });
@@ -111,6 +120,9 @@ export async function POST(request: NextRequest) {
       media,
       scheduledFor: scheduledFor ? new Date(scheduledFor) : undefined,
       status: scheduledFor ? 'scheduled' : 'draft',
+      postAs,
+      organizationId,
+      organizationName,
     });
 
     return NextResponse.json(post, { status: 201 });

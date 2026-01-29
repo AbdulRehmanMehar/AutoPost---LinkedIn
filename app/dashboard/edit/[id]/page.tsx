@@ -55,6 +55,8 @@ export default async function EditPostPage({ params }: EditPostPageProps) {
           initialMedia={post.media || []}
           initialStructuredInput={post.structuredInput}
           initialAiPrompt={post.aiPrompt}
+          initialPostAs={post.postAs || 'person'}
+          initialOrganizationId={post.organizationId}
           postId={post._id.toString()}
           editMode={true}
         />

@@ -2,8 +2,13 @@ import { auth } from '@/lib/auth';
 import { redirect } from 'next/navigation';
 import { PostForm } from '@/components/post-form';
 
-export default async function CreatePostPage() {
+interface Props {
+  searchParams: Promise<{ pageId?: string }>;
+}
+
+export default async function CreatePostPage({ searchParams }: Props) {
   const session = await auth();
+  const params = await searchParams;
 
   if (!session?.user?.email) {
     redirect('/login');
@@ -21,7 +26,7 @@ export default async function CreatePostPage() {
       </div>
 
       <div className="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-        <PostForm />
+        <PostForm initialPageId={params.pageId} />
       </div>
     </div>
   );
