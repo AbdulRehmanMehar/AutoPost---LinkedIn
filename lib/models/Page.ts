@@ -152,6 +152,9 @@ export interface IPage extends Document {
   isSetupComplete: boolean;
   isManual: boolean;  // True if page was created manually without platform connection
   
+  // Page type determines voice in content generation (I vs We)
+  pageType: PageType;  // 'personal' = I voice, 'organization' = We voice
+  
   createdAt: Date;
   updatedAt: Date;
 }
@@ -378,6 +381,11 @@ const PageSchema = new Schema<IPage>(
     isManual: {
       type: Boolean,
       default: false,
+    },
+    pageType: {
+      type: String,
+      enum: ['personal', 'organization', 'manual'],
+      default: 'personal',
     },
   },
   {

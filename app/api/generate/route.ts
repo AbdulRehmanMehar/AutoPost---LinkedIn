@@ -126,6 +126,8 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
         topic: topic || (sourceContentItem?.title ? `Repurposing: ${sourceContentItem.title}` : undefined),
         angle,
         inspiration: finalInspiration,
+        pageId: page._id.toString(),
+        platform: 'linkedin', // Default to LinkedIn for now - can be expanded
       });
 
       // Optionally create a draft post

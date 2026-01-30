@@ -26,6 +26,16 @@ import {
   Linkedin,
   Facebook,
   Twitter,
+  X,
+  Expand,
+  RotateCcw,
+  ExternalLink,
+  Loader2,
+  Target,
+  MessageCircle,
+  Heart,
+  UserPlus,
+  ArrowRight,
 } from 'lucide-react';
 
 interface PlatformConnection {
@@ -71,6 +81,15 @@ interface Page {
   createdAt: string;
 }
 
+interface PlatformResult {
+  platform: string;
+  status: 'pending' | 'published' | 'failed';
+  postId?: string;
+  postUrl?: string;
+  publishedAt?: string;
+  error?: string;
+}
+
 interface Post {
   _id: string;
   content: string;
@@ -78,6 +97,8 @@ interface Post {
   confidenceScore?: number;
   scheduledFor?: string;
   publishedAt?: string;
+  targetPlatforms?: string[];
+  platformResults?: PlatformResult[];
   metrics?: {
     impressions: number;
     likes: number;
@@ -100,12 +121,28 @@ export default function PageDashboard() {
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('all');
   const [generating, setGenerating] = useState(false);
+  const [selectedPost, setSelectedPost] = useState<Post | null>(null);
+  const [retrying, setRetrying] = useState<string | null>(null);
   const [postCounts, setPostCounts] = useState({
     pending: 0,
     scheduled: 0,
     published: 0,
     failed: 0,
   });
+  const [icpStats, setIcpStats] = useState<{
+    total: number;
+    gotReply: number;
+    gotLike: number;
+    gotFollow: number;
+    responseRate: number;
+    recentEngagements: Array<{
+      id: string;
+      targetUser: { username?: string; name?: string };
+      ourReply: { content: string };
+      status: string;
+      engagedAt: string;
+    }>;
+  } | null>(null);
 
   useEffect(() => {
     if (status === 'unauthenticated') {
@@ -117,6 +154,7 @@ export default function PageDashboard() {
     if (session && pageId) {
       fetchPage();
       fetchPosts();
+      fetchIcpStats();
     }
   }, [session, pageId, statusFilter]);
 
@@ -163,6 +201,27 @@ export default function PageDashboard() {
     }
   };
 
+  const fetchIcpStats = async () => {
+    try {
+      const response = await fetch(`/api/icp-engagement?pageId=${pageId}`);
+      if (response.ok) {
+        const data = await response.json();
+        setIcpStats({
+          total: data.stats?.total || 0,
+          gotReply: data.stats?.gotReply || 0,
+          gotLike: data.stats?.gotLike || 0,
+          gotFollow: data.stats?.gotFollow || 0,
+          responseRate: data.stats?.total > 0
+            ? Math.round(((data.stats?.gotReply || 0) + (data.stats?.gotLike || 0) + (data.stats?.gotFollow || 0)) / data.stats.total * 100)
+            : 0,
+          recentEngagements: data.recentEngagements || [],
+        });
+      }
+    } catch (error) {
+      console.error('Failed to fetch ICP stats:', error);
+    }
+  };
+
   const handleGeneratePost = async () => {
     if (!page) return;
     setGenerating(true);
@@ -189,6 +248,36 @@ export default function PageDashboard() {
       alert('Failed to generate post');
     } finally {
       setGenerating(false);
+    }
+  };
+
+  const handleRetryPost = async (postId: string) => {
+    setRetrying(postId);
+    try {
+      const response = await fetch(`/api/posts/${postId}/retry`, {
+        method: 'POST',
+      });
+
+      if (response.ok) {
+        // Refresh posts to show updated status
+        await fetchPosts();
+        // Close modal if open
+        if (selectedPost?._id === postId) {
+          const updatedResponse = await fetch(`/api/posts/${postId}`);
+          if (updatedResponse.ok) {
+            const data = await updatedResponse.json();
+            setSelectedPost(data.post);
+          }
+        }
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to retry post');
+      }
+    } catch (error) {
+      console.error('Failed to retry:', error);
+      alert('Failed to retry post');
+    } finally {
+      setRetrying(null);
     }
   };
 
@@ -348,6 +437,126 @@ export default function PageDashboard() {
           </div>
         </div>
 
+        {/* ICP Twitter Engagement */}
+        {icpStats && (
+          <div className="bg-white dark:bg-zinc-900 rounded-xl border border-gray-200 dark:border-zinc-800 p-6 mb-8">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Twitter className="h-5 w-5 text-[#1DA1F2]" />
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+                  ICP Twitter Engagement
+                </h2>
+                <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 text-xs dark:bg-blue-900 dark:text-blue-300">
+                  30 days
+                </span>
+              </div>
+              <Link
+                href="/dashboard/engagements/icp"
+                className="flex items-center gap-1 text-sm text-blue-600 hover:text-blue-700"
+              >
+                View All
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </div>
+
+            {/* ICP Stats Row */}
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-6">
+              <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-zinc-800">
+                <div className="flex items-center justify-center gap-1 text-gray-500 dark:text-gray-400 mb-1">
+                  <Target className="h-4 w-4" />
+                </div>
+                <div className="text-xl font-bold text-gray-900 dark:text-white">
+                  {icpStats.total}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Outreach</div>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-zinc-800">
+                <div className="flex items-center justify-center gap-1 text-green-500 mb-1">
+                  <MessageCircle className="h-4 w-4" />
+                </div>
+                <div className="text-xl font-bold text-gray-900 dark:text-white">
+                  {icpStats.gotReply}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Replies</div>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-zinc-800">
+                <div className="flex items-center justify-center gap-1 text-purple-500 mb-1">
+                  <Heart className="h-4 w-4" />
+                </div>
+                <div className="text-xl font-bold text-gray-900 dark:text-white">
+                  {icpStats.gotLike}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Likes</div>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-zinc-800">
+                <div className="flex items-center justify-center gap-1 text-emerald-500 mb-1">
+                  <UserPlus className="h-4 w-4" />
+                </div>
+                <div className="text-xl font-bold text-gray-900 dark:text-white">
+                  {icpStats.gotFollow}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Follows</div>
+              </div>
+              <div className="text-center p-3 rounded-lg bg-gray-50 dark:bg-zinc-800">
+                <div className="flex items-center justify-center gap-1 text-amber-500 mb-1">
+                  <TrendingUp className="h-4 w-4" />
+                </div>
+                <div className="text-xl font-bold text-gray-900 dark:text-white">
+                  {icpStats.responseRate}%
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Response Rate</div>
+              </div>
+            </div>
+
+            {/* Recent Engagements Preview */}
+            {icpStats.recentEngagements.length > 0 ? (
+              <div>
+                <h3 className="text-sm font-medium text-gray-600 dark:text-gray-400 mb-3">
+                  Recent Engagements
+                </h3>
+                <div className="space-y-2">
+                  {icpStats.recentEngagements.slice(0, 3).map((engagement) => (
+                    <div
+                      key={engagement.id}
+                      className="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-zinc-800"
+                    >
+                      <Twitter className="h-4 w-4 text-[#1DA1F2] flex-shrink-0 mt-0.5" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2">
+                          <span className="font-medium text-gray-900 dark:text-white text-sm">
+                            @{engagement.targetUser.username || 'unknown'}
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded text-xs ${
+                            engagement.status === 'got_reply' || engagement.status === 'conversation'
+                              ? 'bg-green-100 text-green-700 dark:bg-green-900 dark:text-green-300'
+                              : engagement.status === 'got_like'
+                              ? 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300'
+                              : engagement.status === 'got_follow'
+                              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-zinc-700 dark:text-gray-400'
+                          }`}>
+                            {engagement.status.replace('_', ' ')}
+                          </span>
+                        </div>
+                        <p className="text-gray-600 dark:text-gray-400 text-sm line-clamp-1 mt-1">
+                          {engagement.ourReply.content}
+                        </p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div className="text-center py-6">
+                <Twitter className="h-10 w-10 text-gray-300 dark:text-gray-600 mx-auto mb-2" />
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  No ICP engagements yet. The agent will find and engage with your ideal customers on Twitter.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Strategy Summary */}
         <div className="bg-white dark:bg-zinc-900 rounded-xl border border-gray-200 dark:border-zinc-800 p-6 mb-8">
           <div className="flex items-center justify-between mb-4">
@@ -502,6 +711,38 @@ export default function PageDashboard() {
                         >
                           {post.status}
                         </span>
+                        
+                        {/* Platform badges */}
+                        {post.targetPlatforms && post.targetPlatforms.length > 0 && (
+                          <div className="flex items-center gap-1">
+                            {post.targetPlatforms.map((platform) => {
+                              const result = post.platformResults?.find(r => r.platform === platform);
+                              const isSuccess = result?.status === 'published';
+                              const isFailed = result?.status === 'failed';
+                              
+                              return (
+                                <span
+                                  key={platform}
+                                  className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs ${
+                                    isSuccess
+                                      ? 'bg-green-100 dark:bg-green-900/50 text-green-700 dark:text-green-300'
+                                      : isFailed
+                                      ? 'bg-red-100 dark:bg-red-900/50 text-red-700 dark:text-red-300'
+                                      : 'bg-gray-100 dark:bg-zinc-700 text-gray-600 dark:text-gray-300'
+                                  }`}
+                                  title={result?.error || `${platform}: ${result?.status || 'pending'}`}
+                                >
+                                  {platform === 'facebook' && <Facebook className="h-3 w-3" />}
+                                  {platform === 'twitter' && <Twitter className="h-3 w-3" />}
+                                  {platform === 'linkedin' && <Linkedin className="h-3 w-3" />}
+                                  {isSuccess && <CheckCircle className="h-2.5 w-2.5" />}
+                                  {isFailed && <span className="text-[10px]">✕</span>}
+                                </span>
+                              );
+                            })}
+                          </div>
+                        )}
+                        
                         {post.confidenceScore !== undefined && (
                           <span className="text-gray-500 dark:text-gray-400">
                             {(post.confidenceScore * 100).toFixed(0)}% confidence
@@ -521,13 +762,53 @@ export default function PageDashboard() {
                           </span>
                         )}
                       </div>
+                      
+                      {/* Platform error details */}
+                      {post.platformResults?.some(r => r.status === 'failed') && (
+                        <div className="mt-2 space-y-1">
+                          {post.platformResults.filter(r => r.status === 'failed').map((result) => (
+                            <p key={result.platform} className="text-xs text-red-500 dark:text-red-400 flex items-start gap-1">
+                              {result.platform === 'facebook' && <Facebook className="h-3 w-3 mt-0.5 flex-shrink-0" />}
+                              {result.platform === 'twitter' && <Twitter className="h-3 w-3 mt-0.5 flex-shrink-0" />}
+                              {result.platform === 'linkedin' && <Linkedin className="h-3 w-3 mt-0.5 flex-shrink-0" />}
+                              <span className="truncate">{result.error}</span>
+                            </p>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    <Link
-                      href={`/dashboard/edit/${post._id}`}
-                      className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
-                    >
-                      <Edit3 className="h-4 w-4" />
-                    </Link>
+                    
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => setSelectedPost(post)}
+                        className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400"
+                        title="View full post"
+                      >
+                        <Expand className="h-4 w-4" />
+                      </button>
+                      {(post.status === 'failed' || post.platformResults?.some(r => r.status === 'failed')) && (
+                        <button
+                          onClick={() => handleRetryPost(post._id)}
+                          disabled={retrying === post._id}
+                          className="p-2 text-gray-400 hover:text-green-600 dark:hover:text-green-400 disabled:opacity-50"
+                          title="Retry publishing"
+                        >
+                          {retrying === post._id ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : (
+                            <RotateCcw className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                      <Link
+                        href={`/dashboard/edit/${post._id}`}
+                        className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                        title="Edit post"
+                      >
+                        <Edit3 className="h-4 w-4" />
+                      </Link>
+                    </div>
                   </div>
                 </div>
               ))}
@@ -546,6 +827,131 @@ export default function PageDashboard() {
           )}
         </div>
       </div>
+
+      {/* Post Detail Modal */}
+      {selectedPost && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden">
+            {/* Modal Header */}
+            <div className="flex items-center justify-between p-4 border-b border-gray-200 dark:border-zinc-800">
+              <div className="flex items-center gap-3">
+                <span
+                  className={`px-2 py-0.5 rounded capitalize text-sm ${
+                    selectedPost.status === 'published'
+                      ? 'bg-green-100 dark:bg-green-900 text-green-700 dark:text-green-300'
+                      : selectedPost.status === 'scheduled'
+                      ? 'bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300'
+                      : selectedPost.status === 'failed'
+                      ? 'bg-red-100 dark:bg-red-900 text-red-700 dark:text-red-300'
+                      : 'bg-yellow-100 dark:bg-yellow-900 text-yellow-700 dark:text-yellow-300'
+                  }`}
+                >
+                  {selectedPost.status}
+                </span>
+                {selectedPost.confidenceScore !== undefined && (
+                  <span className="text-sm text-gray-500 dark:text-gray-400">
+                    {(selectedPost.confidenceScore * 100).toFixed(0)}% confidence
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={() => setSelectedPost(null)}
+                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Content */}
+            <div className="p-4 overflow-y-auto max-h-[50vh]">
+              <p className="text-gray-900 dark:text-white whitespace-pre-wrap">
+                {selectedPost.content}
+              </p>
+            </div>
+
+            {/* Platform Results */}
+            {selectedPost.platformResults && selectedPost.platformResults.length > 0 && (
+              <div className="px-4 pb-4 space-y-2">
+                <h4 className="text-sm font-medium text-gray-700 dark:text-gray-300">Platform Status</h4>
+                {selectedPost.platformResults.map((result) => (
+                  <div
+                    key={result.platform}
+                    className={`flex items-center justify-between p-3 rounded-lg ${
+                      result.status === 'published'
+                        ? 'bg-green-50 dark:bg-green-900/20'
+                        : result.status === 'failed'
+                        ? 'bg-red-50 dark:bg-red-900/20'
+                        : 'bg-gray-50 dark:bg-zinc-800'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {result.platform === 'facebook' && <Facebook className="h-4 w-4" />}
+                      {result.platform === 'twitter' && <Twitter className="h-4 w-4" />}
+                      {result.platform === 'linkedin' && <Linkedin className="h-4 w-4" />}
+                      <span className="capitalize font-medium">{result.platform}</span>
+                      {result.status === 'published' && (
+                        <CheckCircle className="h-4 w-4 text-green-600 dark:text-green-400" />
+                      )}
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {result.status === 'published' && result.postUrl && (
+                        <a
+                          href={result.postUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:text-blue-700 text-sm flex items-center gap-1"
+                        >
+                          View <ExternalLink className="h-3 w-3" />
+                        </a>
+                      )}
+                      {result.status === 'failed' && (
+                        <span className="text-sm text-red-600 dark:text-red-400 max-w-xs truncate" title={result.error}>
+                          {result.error}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Modal Footer */}
+            <div className="flex items-center justify-between p-4 border-t border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-800/50">
+              <div className="text-sm text-gray-500 dark:text-gray-400">
+                {selectedPost.scheduledFor && (
+                  <span>
+                    <Clock className="h-3 w-3 inline mr-1" />
+                    Scheduled: {new Date(selectedPost.scheduledFor).toLocaleString()}
+                  </span>
+                )}
+              </div>
+              <div className="flex items-center gap-2">
+                {(selectedPost.status === 'failed' || selectedPost.platformResults?.some(r => r.status === 'failed')) && (
+                  <button
+                    onClick={() => handleRetryPost(selectedPost._id)}
+                    disabled={retrying === selectedPost._id}
+                    className="px-4 py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg flex items-center gap-2 disabled:opacity-50"
+                  >
+                    {retrying === selectedPost._id ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <RotateCcw className="h-4 w-4" />
+                    )}
+                    Retry Publishing
+                  </button>
+                )}
+                <Link
+                  href={`/dashboard/edit/${selectedPost._id}`}
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg flex items-center gap-2"
+                >
+                  <Edit3 className="h-4 w-4" />
+                  Edit Post
+                </Link>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

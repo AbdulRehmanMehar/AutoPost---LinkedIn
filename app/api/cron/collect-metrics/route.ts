@@ -127,11 +127,17 @@ function extractHashtags(content: string): string[] {
 export async function GET(request: NextRequest) {
   try {
     // Verify cron secret
-    const authHeader = request.headers.get('authorization');
     const cronSecret = process.env.CRON_SECRET;
+    if (cronSecret) {
+      const authHeader = request.headers.get('authorization') ?? '';
+      const url = new URL(request.url);
+      const querySecret = url.searchParams.get('key') ?? url.searchParams.get('cron_secret') ?? url.searchParams.get('token') ?? '';
+      const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7) : '';
+      const authorized = bearerToken === cronSecret || querySecret === cronSecret;
 
-    if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      if (!authorized) {
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+      }
     }
 
     await connectToDatabase();

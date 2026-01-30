@@ -2,6 +2,14 @@ import mongoose from 'mongoose';
 import EngagementHistory, { IEngagementHistory, PlatformEngagement } from '../models/EngagementHistory';
 import { PlatformType } from '../platforms/types';
 import { EngagementDataPoint } from '../platforms/schedule-optimizer';
+import { 
+  analyzePostMetrics, 
+  generateLearningPrompt, 
+  comparePosts as comparePostMetrics,
+  getPlatformMetricGuide,
+  PostAnalysis,
+  PostMetrics
+} from './stats-reviewer';
 
 /**
  * Platform Learning Service
@@ -523,3 +531,332 @@ export async function comparePlatformPerformance(
     recommendations,
   };
 }
+// ============================================
+// Stats Reviewer Integration Functions
+// ============================================
+
+/**
+ * Analyze a specific post's metrics and get detailed interpretation
+ */
+export async function analyzePostPerformance(
+  postId: string,
+  platform: PlatformType
+): Promise<PostAnalysis | null> {
+  try {
+    const history = await EngagementHistory.findOne({
+      postId: new mongoose.Types.ObjectId(postId),
+      'platforms.platform': platform,
+    }).populate('postId', 'content');
+
+    if (!history) {
+      return null;
+    }
+
+    const platformEngagement = history.platforms.find(
+      (p: PlatformEngagement) => p.platform === platform
+    );
+
+    if (!platformEngagement) {
+      return null;
+    }
+
+    const metrics: PostMetrics = {
+      impressions: platformEngagement.currentMetrics.impressions,
+      reach: platformEngagement.currentMetrics.reach,
+      likes: platformEngagement.currentMetrics.likes,
+      comments: platformEngagement.currentMetrics.comments,
+      shares: platformEngagement.currentMetrics.shares,
+      clicks: platformEngagement.currentMetrics.clicks,
+      engagementRate: platformEngagement.currentMetrics.engagementRate,
+    };
+
+    const content = (history.postId as unknown as { content?: string })?.content;
+
+    return analyzePostMetrics(platform, metrics, undefined, content);
+  } catch (error) {
+    console.error(`Error analyzing post performance:`, error);
+    return null;
+  }
+}
+
+/**
+ * Get learning insights from recent posts for AI prompt injection
+ */
+export async function getPerformanceInsightsForAI(
+  pageId: string,
+  platform: PlatformType,
+  lookbackDays: number = 30
+): Promise<string> {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
+
+  try {
+    const histories = await EngagementHistory.find({
+      pageId: new mongoose.Types.ObjectId(pageId),
+      'platforms.platform': platform,
+      createdAt: { $gte: cutoffDate },
+    }).populate('postId', 'content');
+
+    if (histories.length === 0) {
+      return getPlatformMetricGuide(platform);
+    }
+
+    const posts: Array<{ content: string; metrics: PostMetrics }> = [];
+
+    for (const history of histories) {
+      const platformEngagement = history.platforms.find(
+        (p: PlatformEngagement) => p.platform === platform
+      );
+      if (!platformEngagement) continue;
+
+      const content = (history.postId as unknown as { content?: string })?.content;
+      if (!content) continue;
+
+      posts.push({
+        content,
+        metrics: {
+          impressions: platformEngagement.currentMetrics.impressions,
+          reach: platformEngagement.currentMetrics.reach,
+          likes: platformEngagement.currentMetrics.likes,
+          comments: platformEngagement.currentMetrics.comments,
+          shares: platformEngagement.currentMetrics.shares,
+          clicks: platformEngagement.currentMetrics.clicks,
+          engagementRate: platformEngagement.currentMetrics.engagementRate,
+        },
+      });
+    }
+
+    if (posts.length < 2) {
+      return getPlatformMetricGuide(platform);
+    }
+
+    // Compare posts to find patterns
+    const comparison = comparePostMetrics(platform, posts);
+    
+    // Generate learning prompt from best performer
+    const bestAnalysis = comparison.bestPerformer.analysis;
+    const learningPrompt = generateLearningPrompt(bestAnalysis);
+
+    // Build comprehensive insights
+    const lines: string[] = [];
+    
+    lines.push(`## Performance Insights for ${platform.toUpperCase()}`);
+    lines.push('');
+    lines.push(`Based on analysis of ${posts.length} recent posts:`);
+    lines.push('');
+    
+    lines.push('### Best Performing Post Characteristics:');
+    lines.push(learningPrompt);
+    lines.push('');
+    
+    if (comparison.commonSuccessFactors.length > 0) {
+      lines.push('### What Works on Your Account:');
+      for (const factor of comparison.commonSuccessFactors) {
+        lines.push(`- ${factor}`);
+      }
+      lines.push('');
+    }
+    
+    if (comparison.commonFailureFactors.length > 0) {
+      lines.push('### What to Avoid:');
+      for (const factor of comparison.commonFailureFactors) {
+        lines.push(`- ${factor}`);
+      }
+      lines.push('');
+    }
+
+    // Add platform guide
+    lines.push('### Platform-Specific Guidance:');
+    lines.push(getPlatformMetricGuide(platform));
+
+    return lines.join('\n');
+  } catch (error) {
+    console.error(`Error getting performance insights:`, error);
+    return getPlatformMetricGuide(platform);
+  }
+}
+
+/**
+ * Get a summary of what's working and not working across all posts
+ */
+export async function getContentStrategyReport(
+  pageId: string,
+  platform: PlatformType,
+  lookbackDays: number = 90
+): Promise<{
+  summary: string;
+  topPatterns: string[];
+  weaknesses: string[];
+  recommendations: string[];
+  benchmarkComparison: {
+    metric: string;
+    yourAvg: number;
+    benchmark: number;
+    status: string;
+  }[];
+}> {
+  const cutoffDate = new Date();
+  cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
+
+  try {
+    const histories = await EngagementHistory.find({
+      pageId: new mongoose.Types.ObjectId(pageId),
+      'platforms.platform': platform,
+      createdAt: { $gte: cutoffDate },
+    });
+
+    if (histories.length === 0) {
+      return {
+        summary: 'Not enough data to generate strategy report.',
+        topPatterns: [],
+        weaknesses: [],
+        recommendations: ['Post more content to build performance data.'],
+        benchmarkComparison: [],
+      };
+    }
+
+    // Analyze all posts
+    const allAnalyses: PostAnalysis[] = [];
+    const patternCounts = new Map<string, number>();
+    const weaknessCounts = new Map<string, number>();
+    let totalEngagementRate = 0;
+    let totalCommentRatio = 0;
+    let totalShareRatio = 0;
+
+    for (const history of histories) {
+      const platformEngagement = history.platforms.find(
+        (p: PlatformEngagement) => p.platform === platform
+      );
+      if (!platformEngagement) continue;
+
+      const metrics: PostMetrics = {
+        impressions: platformEngagement.currentMetrics.impressions,
+        likes: platformEngagement.currentMetrics.likes,
+        comments: platformEngagement.currentMetrics.comments,
+        shares: platformEngagement.currentMetrics.shares,
+        clicks: platformEngagement.currentMetrics.clicks,
+        engagementRate: platformEngagement.currentMetrics.engagementRate,
+      };
+
+      const analysis = analyzePostMetrics(platform, metrics);
+      allAnalyses.push(analysis);
+
+      // Track patterns
+      for (const pattern of analysis.patterns) {
+        patternCounts.set(pattern.pattern, (patternCounts.get(pattern.pattern) || 0) + 1);
+      }
+
+      // Track weaknesses
+      for (const weakness of analysis.contentCharacteristics.weaknesses) {
+        weaknessCounts.set(weakness, (weaknessCounts.get(weakness) || 0) + 1);
+      }
+
+      // Accumulate metrics
+      totalEngagementRate += metrics.engagementRate;
+      const totalEng = metrics.likes + metrics.comments + metrics.shares;
+      if (totalEng > 0) {
+        totalCommentRatio += metrics.comments / totalEng;
+        totalShareRatio += metrics.shares / totalEng;
+      }
+    }
+
+    const postCount = allAnalyses.length;
+    const avgEngagementRate = totalEngagementRate / postCount;
+    const avgCommentRatio = totalCommentRatio / postCount;
+    const avgShareRatio = totalShareRatio / postCount;
+
+    // Sort patterns by frequency
+    const topPatterns = Array.from(patternCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([pattern, count]) => `${pattern} (seen in ${count}/${postCount} posts)`);
+
+    // Sort weaknesses by frequency
+    const weaknesses = Array.from(weaknessCounts.entries())
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([weakness, count]) => `${weakness} is weak in ${count}/${postCount} posts`);
+
+    // Generate recommendations based on weaknesses
+    const recommendations: string[] = [];
+    if (weaknessCounts.has('comments')) {
+      recommendations.push('Add open-ended questions to posts to drive more comments.');
+    }
+    if (weaknessCounts.has('shares')) {
+      recommendations.push('Create more shareable content: frameworks, insights, or quotable lines.');
+    }
+    if (weaknessCounts.has('engagementRate')) {
+      recommendations.push('Strengthen hooks and add clearer calls-to-action.');
+    }
+
+    // Benchmark comparisons
+    const benchmarks: { [key: string]: number } = {
+      linkedin: 2.0,
+      facebook: 0.09,
+      twitter: 2.15,
+      instagram: 1.5,
+    };
+
+    const benchmarkComparison = [
+      {
+        metric: 'Engagement Rate',
+        yourAvg: Math.round(avgEngagementRate * 100) / 100,
+        benchmark: benchmarks[platform] || 1.5,
+        status: avgEngagementRate >= (benchmarks[platform] || 1.5) ? 'Above average' : 'Below average',
+      },
+      {
+        metric: 'Comment Ratio',
+        yourAvg: Math.round(avgCommentRatio * 100),
+        benchmark: 30,
+        status: avgCommentRatio * 100 >= 30 ? 'Good conversation' : 'Needs more discussion',
+      },
+      {
+        metric: 'Share Ratio',
+        yourAvg: Math.round(avgShareRatio * 100),
+        benchmark: 20,
+        status: avgShareRatio * 100 >= 20 ? 'Good shareability' : 'Improve shareable value',
+      },
+    ];
+
+    // Generate summary
+    const avgScore = allAnalyses.reduce((sum, a) => sum + a.performanceScore, 0) / postCount;
+    let summary = `Analyzed ${postCount} posts from the last ${lookbackDays} days. `;
+    summary += `Average performance score: ${Math.round(avgScore)}/100. `;
+    
+    if (avgScore >= 70) {
+      summary += 'Your content strategy is performing well!';
+    } else if (avgScore >= 50) {
+      summary += 'Your content is solid but has room for improvement.';
+    } else {
+      summary += 'Content strategy needs significant optimization.';
+    }
+
+    return {
+      summary,
+      topPatterns,
+      weaknesses,
+      recommendations,
+      benchmarkComparison,
+    };
+  } catch (error) {
+    console.error(`Error generating content strategy report:`, error);
+    return {
+      summary: 'Error generating report.',
+      topPatterns: [],
+      weaknesses: [],
+      recommendations: [],
+      benchmarkComparison: [],
+    };
+  }
+}
+
+// Re-export stats reviewer functions for convenience
+export { 
+  analyzePostMetrics, 
+  generateLearningPrompt, 
+  getPlatformMetricGuide,
+};
+export type {
+  PostAnalysis,
+  PostMetrics,
+};

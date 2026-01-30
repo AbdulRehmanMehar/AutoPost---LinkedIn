@@ -9,16 +9,13 @@ fi
 
 endpoint="${1:-}"
 if [ -z "$endpoint" ]; then
-  echo "Missing endpoint (publish|engage)" >&2
+  echo "Missing endpoint (publish|engage|token-refresh|...)" >&2
   exit 2
 fi
 
 : "${APP_URL:?APP_URL is required}"
 : "${CRON_SECRET:?CRON_SECRET is required}"
 
-if LC_ALL=C printf %s "$CRON_SECRET" | grep -Eq '^[ -~]+$'; then
-  curl -fsS -H "Authorization: Bearer $CRON_SECRET" "$APP_URL/api/cron/$endpoint"
-else
-  # Some HTTP stacks reject non-ASCII header values; use URL-encoded query param.
-  curl -G -fsS --data-urlencode "cron_secret=$CRON_SECRET" "$APP_URL/api/cron/$endpoint"
-fi
+# Some endpoints use ?key= param, others use Bearer header
+# Try query param method first (more compatible)
+curl -G -fsS --data-urlencode "key=$CRON_SECRET" "$APP_URL/api/cron/$endpoint"

@@ -18,6 +18,7 @@ import {
   ReviewDecision,
 } from '@/lib/learning';
 import { withLock } from '@/lib/distributed-lock';
+import { sendApprovalEmail, generateApprovalToken, getTokenExpiration } from '@/lib/email';
 
 // This cron job runs daily to auto-generate posts for pages that have auto-generation enabled
 // It checks each page's schedule and posting frequency to determine if a new post should be generated
@@ -62,11 +63,17 @@ function getNextOccurrence(dayOfWeek: number, hour: number, timezone?: string): 
 
 export async function GET(request: NextRequest) {
   // Verify cron secret for security
-  const authHeader = request.headers.get('authorization');
   const cronSecret = process.env.CRON_SECRET;
+  if (cronSecret) {
+    const authHeader = request.headers.get('authorization') ?? '';
+    const url = new URL(request.url);
+    const querySecret = url.searchParams.get('key') ?? url.searchParams.get('cron_secret') ?? url.searchParams.get('token') ?? '';
+    const bearerToken = authHeader.toLowerCase().startsWith('bearer ') ? authHeader.slice(7) : '';
+    const authorized = bearerToken === cronSecret || querySecret === cronSecret;
 
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    if (!authorized) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
   }
 
   await connectToDatabase();
@@ -267,12 +274,20 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
               platformInspiration += '\n\n' + generateLearningPromptAdditions(learningContext);
             }
             
+            // Build content strategy with page type for proper voice (I vs We)
+            const strategyWithPageType = {
+              ...(page.contentStrategy || {}),
+              pageType: page.pageType || 'personal', // Pass page type for voice selection
+            } as PageContentStrategy;
+            
             // Generate content optimized for this platform
             const generatedResult = await generatePostWithStrategy({
-              strategy: page.contentStrategy as PageContentStrategy,
+              strategy: strategyWithPageType,
               topic: sourceContentItem?.title ? `Repurposing: ${sourceContentItem.title}` : undefined,
               angle: recommendedAngle,
               inspiration: platformInspiration,
+              pageId: page._id.toString(),
+              platform: platform as 'linkedin' | 'facebook' | 'twitter' | 'instagram',
             });
 
             // AI REVIEWER: Autonomous quality assessment and publish decision
@@ -281,7 +296,7 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
             const reviewDecision: ReviewDecision = await reviewContentForPublishing({
               content: generatedResult.content,
               platform,
-              strategy: page.contentStrategy as PageContentStrategy,
+              strategy: strategyWithPageType,
               topic: sourceContentItem?.title,
               angle: recommendedAngle,
               sourceContent: sourceContentItem ? {
@@ -432,6 +447,41 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
                 reasoning: reviewDecision.reasoning,
               },
             });
+
+            // Send approval email if post needs human review
+            if (status === 'pending_approval' && user?.email) {
+              try {
+                const approvalToken = generateApprovalToken();
+                const tokenExpiration = getTokenExpiration();
+                
+                // Update post with approval token
+                await Post.findByIdAndUpdate(post._id, {
+                  'approval.token': approvalToken,
+                  'approval.tokenExpiresAt': tokenExpiration,
+                });
+                
+                // Send the email
+                await sendApprovalEmail(user.email, {
+                  postId: post._id.toString(),
+                  postContent: generatedResult.content,
+                  confidence: reviewDecision.confidence,
+                  riskLevel: reviewDecision.criteria.riskAssessment.level === 'critical' ? 'high' :
+                             reviewDecision.criteria.riskAssessment.level as 'low' | 'medium' | 'high',
+                  riskReasons: reviewDecision.criteria.riskAssessment.concerns,
+                  angle: generatedResult.angle,
+                  aiReasoning: reviewDecision.reasoning,
+                  scheduledFor,
+                  includesLink: /https?:\/\//.test(generatedResult.content),
+                  linkUrl: generatedResult.content.match(/https?:\/\/[^\s]+/)?.[0],
+                  approvalToken,
+                });
+                
+                console.log(`Approval email sent for post ${post._id} to ${user.email}`);
+              } catch (emailError) {
+                console.error('Failed to send approval email:', emailError);
+                // Don't fail the generation if email fails
+              }
+            }
             
           } catch (platformError) {
             console.error(`Failed to generate for platform ${platform}:`, platformError);

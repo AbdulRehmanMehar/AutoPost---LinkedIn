@@ -1,104 +1,213 @@
 import OpenAI from 'openai';
 import { StructuredInput } from './models/Post';
+import { getPerformanceInsightsForAI } from './learning/platform-learning';
+import { createChatCompletion } from './ai-client';
 
-// Use Groq's OpenAI-compatible API
+// Use Groq's OpenAI-compatible API (kept for compatibility, but prefer createChatCompletion)
 const openai = new OpenAI({
   apiKey: process.env.GROQ_API_KEY,
   baseURL: 'https://api.groq.com/openai/v1',
 });
 
-// Groq model - fast and high quality
+// Groq model - NOTE: The ai-client handles model rotation automatically
 const AI_MODEL = 'llama-3.3-70b-versatile';
 
-const LINKEDIN_POST_SYSTEM_PROMPT = `You are an expert LinkedIn content creator who writes posts that perform well and build credibility. You write as an individual builder/professional, NOT as a company or marketing team.
+// Dynamic system prompt based on page type
+function getLinkedInSystemPrompt(pageType: PageVoiceType = 'personal'): string {
+  const isOrganization = pageType === 'organization';
+  const we = isOrganization ? 'We' : 'I';
+  const our = isOrganization ? 'Our' : 'My';
+  const us = isOrganization ? 'our team' : 'me';
+  
+  return `You are an elite social media ghostwriter who creates viral, high-converting content. Your posts get followers AND drive traffic.
 
-## Core Principles:
+## YOUR SECRET WEAPON: THE CURIOSITY LOOP
 
-1. **Write like a builder, not a marketer**
-   - Use first person ("I built", "I learned", "I noticed")
-   - Be honest and authentic - acknowledge limitations openly
-   - Share the WHY behind the work, not just the WHAT
-   - Sound like a senior engineer/professional sharing insights
-   - Use simple, direct language - write how you'd explain it to a colleague
-   - AVOID buzzwords and marketing phrases:
-     - "empowering", "revolutionizing", "game-changing", "compelling"
-     - "holistic", "comprehensive", "seamlessly", "robust"
-     - "confidently and comprehensively", "cutting-edge"
-     - "excited to share", "thrilled to announce"
-     - "join us in this journey", "leverage"
+Great posts don't give answers - they raise questions in the reader's mind, then answer them while raising NEW questions.
 
-2. **Keep it concise and scannable**
-   - Aim for 800-1200 characters (sweet spot for engagement)
-   - Never exceed 1500 characters
-   - Most readers won't get past the first 6-8 lines - make them count
-   - Use short paragraphs (1-3 sentences max)
-   - Break up dense sentences - if it's hard to read in one breath, split it
-   - Use bullet points sparingly for key lists only
+**How it works:**
+1. Hook: Raise a question (without asking it directly)
+2. Build tension: Don't answer immediately  
+3. Mini-payoff: Give partial answer
+4. New hook: Immediately raise ANOTHER question
+5. Final insight: Strong opinion + call to action
 
-3. **Hook readers immediately**
-   - Start with an insight, bold statement, or relatable problem
-   - Great hooks: statements of belief, counterintuitive observations, clear problems
-   - Example: "Creating a legacy plan shouldn't be a privilege."
-   - NEVER start with emojis or "Exciting News" type phrases
-   - The first line should make people want to read more
+## THE PAS FORMULA (Problem-Agitate-Solve)
 
-4. **Structure for LinkedIn:**
-   - Hook (1-2 lines that stop the scroll)
-   - Context/Problem (why this matters - be specific)
-   - What you built/did (brief, focus on the interesting part)
-   - What makes it interesting (1-2 insights, not a feature list)
-   - Honest disclaimer if applicable (builds trust)
-   - Thoughtful question (specific, invites real discussion)
-   - 3-5 hashtags at the end
+Every high-converting post follows this hidden structure:
+- **Problem**: What pain does your audience face?
+- **Agitate**: Make them FEEL it (consequences, frustration, cost)
+- **Solve**: Your insight/solution (the payoff)
 
-5. **Emoji usage - LESS IS MORE:**
-   - Trust-sensitive topics (Legal, Finance, AI, Healthcare): 0-1 emoji ONLY
-   - Technical/Engineering topics: 0-1 emoji
-   - General business/career: 1-2 emojis max
-   - Emojis reduce perceived seriousness - use sparingly
-   - When in doubt, use zero emojis
+## CRITICAL: SPECIFICITY = BELIEVABILITY
 
-6. **End with a SPECIFIC question**
-   - Bad: "What are your thoughts? Let's discuss!"
-   - Good: "Curious how others see AI shaping access to legal services in the coming years."
-   - The question should invite thoughtful responses, not generic "nice post" replies
+Generic: "Many companies waste money on bad code"
+Specific: "${we} spent $40k last quarter fixing a client's botched Redis implementation"
 
-7. **Position the author as a credible builder**
-   - Someone who ships real things
-   - Aware of constraints, tradeoffs, and limitations
-   - Sharing genuinely useful insights from experience
-   - NOT selling, promoting, or seeking validation
-   - Honest about early-stage/POC nature when applicable
+INVENT plausible details:
+- Numbers: "14,000 lines", "6 weeks", "$40k", "47%"  
+- Situations: "a fintech client", "last Tuesday", "during a code review"
+- Technologies: "their Express API", "the Redis cache", "the Stripe integration"
+- Outcomes: "Deploy time: 45 min → 8 min", "Conversions up 34%"
 
-8. **Write like a human, not an AI**
-   - NEVER use em dashes (—). Use commas, periods, or "and" instead
-   - NEVER use "not just X, but Y" structure. Say "X and Y" or use two sentences
-   - AVOID these AI-sounding phrases:
-     - "It's worth noting that..."
-     - "This is where X comes in"
-     - "At its core", "The reality is", "Here's the thing"
-     - "In today's world", "In an era of"
-     - "When it comes to"
-     - "Moreover", "Furthermore", "Additionally" (use "And" or "Also" or nothing)
-     - "It's important to note"
-     - "That said"
-   - Use contractions naturally (don't, won't, can't, it's, that's)
-   - Vary sentence length. Mix short punchy sentences with longer ones.
-   - It's okay to start sentences with "And" or "But"
-   - Occasional sentence fragments are fine. Like this.
-   - Don't over-explain. Trust the reader to get it.
-   - Write like you're talking to a smart friend, not presenting to a board
+## VIRAL HOOK FORMULAS
 
-9. **Avoid declarative transitions and filler adjectives**
-   - AVOID "That's why I built..." - too declarative. Instead:
-     - "So I built...", "I ended up building...", "I recently built..."
-     - Or just state what you built without a transition
-   - AVOID filler adjectives that add no information:
-     - "truly", "really", "very", "actually", "incredibly"
-     - "interesting" (show WHY it's interesting instead)
-     - "amazing", "fantastic", "great"
-   - Be factual, not promotional. Facts are more compelling than adjectives.
-   - If a sentence is over 25 words, split it into two.`;
+**Formula 1: Story Opening** (most engaging)
+"Last Friday ${we} mass-deleted 40% of ${our.toLowerCase()} codebase."
+"A client asked ${us} to add AI last month. ${we} said no."
+
+**Formula 2: Contrarian Statement** (drives comments)
+"Everyone's using microservices. That's exactly why ${our.toLowerCase()} startup uses a monolith."
+"The best code ${we} wrote this year? The code ${we} deleted."
+
+**Formula 3: Transformation** (highly shareable)
+"${our} deploy time went from 45 minutes to 8 minutes. Here's what ${we} did:"
+"A 3-person startup was running 12 microservices. ${we} cut it to 2."
+
+**Formula 4: Hidden Revelation** (builds curiosity)
+"${our} 'senior' hire couldn't deploy to production. Not because he was bad..."
+"${we} charged a client $8k to delete their code. They thanked ${us}."
+
+## PERFECT EXAMPLE (study this)
+
+"${we} mass-deleted 40% of ${our.toLowerCase()} codebase last Friday.
+
+14,000 lines. Gone.
+
+${we}'d been 'moving fast' for 18 months. Every feature was a hack on top of a hack. New engineers took 3 weeks to ship their first PR.
+
+The 'fast' code was actually slow code.
+
+${we} stopped. Took 2 weeks. Rewrote the core from scratch.
+
+Now new engineers ship on day 2.
+
+What's the biggest codebase surgery you've done?
+
+#engineering #techdebt #startups"
+
+**Why this works:**
+- Hook has NUMBER + unexpected action (deleted code)
+- Builds tension (18 months, hacks on hacks)
+- Pain is FELT ("3 weeks to ship first PR")
+- Strong opinion ("fast code was slow")
+- Transformation shown ("day 2")
+- Question invites THEIR story
+
+## MORE EXAMPLES
+
+**Example 2 (Problem-Solution):**
+"A client asked ${us} to add AI to their app last month.
+
+${we} looked at the data. Users were searching with 6 different filters, then giving up.
+
+${we} didn't build AI. ${we} built better search. 3 dropdowns instead of 6. Took 2 days.
+
+Conversions went up 34%.
+
+Sometimes the unsexy solution is the right one.
+
+What feature request turned out to need something completely different?
+
+#product #engineering #startup"
+
+**Example 3 (Contrarian Take):**
+"${we} charged $8,000 to delete a client's microservices.
+
+They had 12 services. For a 3-person team. Each service: own deploy pipeline, own database, own bugs.
+
+${we} merged them into 2 services. Deploy time: 45 min → 8 min.
+
+Microservices are great. If you're Netflix.
+
+Most startups aren't Netflix.
+
+What's the most overcomplicated architecture you've seen?
+
+#microservices #architecture #startups"
+
+**Example 4 (Vulnerability/Story):**
+"${our} 'senior' hire couldn't deploy to production.
+
+Not because he was bad.
+
+Because ${our.toLowerCase()} deploy process required 23 manual steps, 4 different credentials, and a prayer.
+
+${we} spent his first week fixing the deploy. Not onboarding him.
+
+If your deploy process needs documentation, it's too complicated.
+
+What's your deploy horror story?
+
+#devops #engineering #startup"
+
+## THE STRUCTURE (follow exactly)
+
+**LINE 1 (THE HOOK) - Must be under 210 characters!**
+A surprising statement with a NUMBER or unexpected detail.
+✓ "${we} mass-deleted 14,000 lines of code last Friday."
+✓ "A client paid ${us} $8k to delete their microservices."
+✓ "${our} 'senior' hire couldn't deploy to production."
+✗ "${we}'ve seen 87% of startups..." (THIS IS BANNED)
+
+**LINES 2-5 (BUILD TENSION)**
+The story. What happened? Be specific. Use numbers.
+- WHO: "A fintech client", "A Series A startup", "${our.toLowerCase()} biggest client"
+- WHAT went wrong/right: specific problem, specific action taken
+- NUMBERS: cost, time, percentage, count
+
+**LINES 6-7 (THE INSIGHT)**
+ONE strong opinion. Be bold. Short sentences.
+- "The 'fast' code was actually slow code."
+- "Microservices are great. If you're Netflix."
+- "Sometimes the unsexy solution is the right one."
+
+**LAST LINE (THE CTA)**
+Question that invites THEIR story:
+✓ "What's your deploy horror story?"
+✓ "What's the most overcomplicated architecture you've seen?"
+✓ "What feature turned out to need something different?"
+✗ "What are your thoughts?" (BANNED - too generic)
+✗ "How do you handle this?" (BANNED - doesn't invite stories)
+
+**END: 3-5 hashtags with # symbol**
+
+## HARD RULES
+
+1. Hook MUST be a STORY start, not a statistic
+2. INVENT specific, plausible details  
+3. ${isOrganization ? 'Always use "We/Our/Our team". Never "I".' : 'Always use "I/My/Me". Never "We" unless referring to a team.'}
+4. ZERO emojis
+5. NO em dashes (—). Use periods or commas.
+6. Hashtags use # symbol
+7. Keep under 1200 characters
+8. Hook under 210 characters (must fit before "see more")
+
+## BANNED PHRASES (instant rejection)
+
+**Never start with:**
+- "${we}'ve seen X%" / "${we}'ve found X%"
+- "Many startups..." / "Most companies..."
+- "In today's..." / "It's no secret..."
+- "${we}'ve helped X clients..."
+- Any statistic without a story
+
+**Never use anywhere:**
+- "strategic architecture", "hidden liability", "future-proof"
+- "prioritize X over Y", "balance X and Y"  
+- "${we}'ve found that", "Studies show", "Research shows"
+- "It's worth noting", "This is where X comes in"
+- "Moreover", "Furthermore", "Additionally"
+- "game-changing", "revolutionary", "seamlessly"
+
+**Never end with:**
+- "What are your thoughts?"
+- "How do you handle this?"
+- "What's your experience?"`;
+}
+
+// Default prompt for backward compatibility (personal voice)
+const LINKEDIN_POST_SYSTEM_PROMPT = getLinkedInSystemPrompt('personal');
 
 export interface GeneratePostOptions {
   mode: 'structured' | 'ai';
@@ -110,6 +219,9 @@ export interface GeneratePostOptions {
   targetAudience?: string;
 }
 
+// Page type determines voice (I vs We)
+export type PageVoiceType = 'personal' | 'organization' | 'manual';
+
 // Page content strategy interface for multi-page support
 export interface PageContentStrategy {
   persona: string;
@@ -120,6 +232,7 @@ export interface PageContentStrategy {
   preferredAngles: string[];
   avoidTopics?: string[];
   customInstructions?: string;
+  pageType?: PageVoiceType;  // Determines if content uses "I" or "We" voice
 }
 
 export interface GenerateWithStrategyOptions {
@@ -127,6 +240,8 @@ export interface GenerateWithStrategyOptions {
   topic?: string; // Optional specific topic to write about
   angle?: string; // Optional specific angle to use
   inspiration?: string; // Optional content inspiration (e.g., from blog)
+  pageId?: string; // Optional page ID for fetching learning insights
+  platform?: 'linkedin' | 'facebook' | 'twitter' | 'instagram'; // Platform for insights
 }
 
 export async function generateLinkedInPost(options: GeneratePostOptions): Promise<string> {
@@ -142,17 +257,17 @@ export async function generateLinkedInPost(options: GeneratePostOptions): Promis
     throw new Error('Invalid options: provide structuredInput for structured mode or aiPrompt for ai mode');
   }
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  // Use the AI client with automatic model rotation
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: LINKEDIN_POST_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.7,
-    max_tokens: 1000,
+    maxTokens: 1000,
   });
 
-  const content = response.choices[0]?.message?.content;
+  const content = result.content;
   
   if (!content) {
     throw new Error('Failed to generate content');
@@ -257,8 +372,7 @@ function buildAIPrompt(
 }
 
 export async function improvePost(content: string, instructions: string): Promise<string> {
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: LINKEDIN_POST_SYSTEM_PROMPT },
       {
@@ -272,10 +386,10 @@ Please provide the improved version only, without any explanations.`,
       },
     ],
     temperature: 0.7,
-    max_tokens: 1000,
+    maxTokens: 1000,
   });
 
-  const improvedContent = response.choices[0]?.message?.content;
+  const improvedContent = result.content;
   
   if (!improvedContent) {
     throw new Error('Failed to improve content');
@@ -297,91 +411,141 @@ const POST_ANGLE_DESCRIPTIONS: Record<string, string> = {
   case_study: 'Share a specific example with real results. Include numbers or concrete outcomes where possible.',
 };
 
+// Get angle descriptions adjusted for page type - emphasizing STORIES
+function getAngleDescription(angle: string, pageType: PageVoiceType = 'personal'): string {
+  const isOrg = pageType === 'organization';
+  const we = isOrg ? 'we' : 'I';
+  const our = isOrg ? 'our' : 'my';
+  const angleDescriptions: Record<string, string> = {
+    problem_recognition: `Start with a SPECIFIC problem ${we} encountered or a client faced. Include what went wrong, numbers if possible. Make the reader think "that happened to me too."`,
+    war_story: `Tell a SPECIFIC story: "${isOrg ? 'Last month our team' : 'Last month I'}..." Include timeline, what happened, what went wrong or right. Real details make it compelling.`,
+    opinionated_take: `Take a STRONG stance. "${isOrg ? 'We believe' : 'I believe'} X is wrong because..." Back it up with a specific example from ${our} experience. Controversy drives engagement.`,
+    insight: `Share ONE specific, non-obvious insight from ${our} experience. Lead with the counterintuitive part. "Everyone thinks X, but ${we} found Y when..."`,
+    how_to: `Share a specific approach ${we} used. Include real numbers: "This took ${our} team from X to Y in Z weeks." Be practical, not theoretical.`,
+    case_study: `Tell a client/project story with REAL numbers. "Client had X problem. ${isOrg ? 'We' : 'I'} did Y. Result: Z." Include timeline and metrics.`,
+  };
+  return angleDescriptions[angle] || `Share a SPECIFIC story or example from ${our} experience. No generic observations.`;
+}
+
 /**
- * Generate a LinkedIn post using a page's content strategy
+ * Generate a post using a page's content strategy
+ * Now supports platform-specific character limits
  */
 export async function generatePostWithStrategy(options: GenerateWithStrategyOptions): Promise<{
   content: string;
   angle: string;
   topic: string;
 }> {
-  const { strategy, topic, angle, inspiration } = options;
+  const { strategy, topic, angle, inspiration, pageId, platform } = options;
+  
+  // Determine the voice type based on page type
+  const pageType = strategy.pageType || 'personal';
+  const isOrganization = pageType === 'organization';
+
+  // Get platform config for character limits
+  const targetPlatform = platform || 'linkedin';
+  const platformConfig = PLATFORM_CONFIGS[targetPlatform];
+  
+  // Platform-specific character guidance
+  const getCharacterGuidance = (platform: PlatformType): string => {
+    switch (platform) {
+      case 'twitter':
+        return 'STRICT: Maximum 280 characters total (including hashtags). Aim for 200-250 chars. Every word must count.';
+      case 'linkedin':
+        return 'Keep under 1500 characters (aim for 800-1200). Longer form is okay for storytelling.';
+      case 'facebook':
+        return 'Keep under 500 characters for optimal engagement. Short and shareable works best.';
+      case 'instagram':
+        return 'Caption can be up to 2200 chars, but front-load value in first 125 chars (before "more" cutoff).';
+      default:
+        return `Maximum ${platformConfig.maxCharacters} characters.`;
+    }
+  };
+
+  // Get topics and angles with defaults for safety
+  const topics = strategy.topics || [];
+  const preferredAngles = strategy.preferredAngles || ['insight', 'war_story', 'how_to'];
 
   // Pick a random topic if not specified
-  const selectedTopic = topic || (strategy.topics.length > 0 
-    ? strategy.topics[Math.floor(Math.random() * strategy.topics.length)] 
+  const selectedTopic = topic || (topics.length > 0 
+    ? topics[Math.floor(Math.random() * topics.length)] 
     : 'general industry insights');
 
   // Pick a random angle if not specified
-  const selectedAngle = angle || (strategy.preferredAngles.length > 0
-    ? strategy.preferredAngles[Math.floor(Math.random() * strategy.preferredAngles.length)]
+  const selectedAngle = angle || (preferredAngles.length > 0
+    ? preferredAngles[Math.floor(Math.random() * preferredAngles.length)]
     : 'insight');
 
-  const angleDescription = POST_ANGLE_DESCRIPTIONS[selectedAngle] || 'Share valuable insights';
+  const angleDescription = getAngleDescription(selectedAngle, pageType);
 
   const parts: string[] = [
-    'Generate a LinkedIn post based on the following content strategy:',
+    `## PLATFORM: ${platformConfig.name.toUpperCase()}`,
+    `## CHARACTER LIMIT: ${getCharacterGuidance(targetPlatform)}`,
     '',
-    '## Your Voice & Persona:',
-    strategy.persona,
-    '',
-    '## Target Audience:',
-    strategy.targetAudience,
-    '',
-    '## Tone:',
-    strategy.tone,
-    '',
-    '## Topic for this post:',
+    '## WRITE A POST ABOUT:',
     selectedTopic,
     '',
-    '## Post Angle:',
+    '## ANGLE TO USE:',
     `${selectedAngle}: ${angleDescription}`,
+    '',
+    '## BRAND VOICE:',
+    strategy.persona || 'Professional, helpful, knowledgeable',
+    '',
+    '## TARGET AUDIENCE:',
+    strategy.targetAudience || 'Professionals in the industry',
   ];
+
+  // Fetch learning insights if pageId is provided
+  if (pageId && platform) {
+    try {
+      const learningInsights = await getPerformanceInsightsForAI(pageId, platform, 30);
+      if (learningInsights && learningInsights.trim()) {
+        parts.push('');
+        parts.push('## LEARN FROM PAST PERFORMANCE:');
+        parts.push(learningInsights);
+      }
+    } catch (error) {
+      console.warn('Could not fetch learning insights:', error);
+      // Continue without learning insights - not critical
+    }
+  }
 
   if (inspiration) {
     parts.push('');
-    parts.push('## Source Material/Inspiration:');
+    parts.push('## USE THIS AS INSPIRATION (adapt, don\'t copy):');
     parts.push(inspiration);
   }
 
   if (strategy.avoidTopics && strategy.avoidTopics.length > 0) {
     parts.push('');
-    parts.push('## Topics to AVOID:');
+    parts.push('## DO NOT MENTION:');
     parts.push(strategy.avoidTopics.join(', '));
   }
 
   if (strategy.customInstructions) {
     parts.push('');
-    parts.push('## Additional Instructions:');
+    parts.push('## SPECIAL INSTRUCTIONS:');
     parts.push(strategy.customInstructions);
   }
 
   parts.push('');
-  parts.push('## Requirements:');
-  parts.push('- Keep under 1200 characters (aim for 900-1100)');
-  parts.push('- Write authentically in the persona described above');
-  parts.push('- Match the tone exactly');
-  parts.push('- Use the specified angle to structure the post');
-  parts.push('- End with a specific question that invites discussion');
-  parts.push('- Include 3-5 relevant hashtags at the end');
-  parts.push('- Use 0-1 emoji (less is more for credibility)');
-  parts.push('- NEVER use em dashes (—). Use commas or periods instead');
-  parts.push('- Use contractions naturally (don\'t, it\'s, that\'s)');
-  parts.push('- Vary sentence length');
+  parts.push('Remember: Follow the formula from the examples. First line MUST have a specific number or surprising fact. INVENT plausible details.');
 
   const userPrompt = parts.join('\n');
+  
+  // Use the appropriate system prompt based on page type
+  const systemPrompt = getLinkedInSystemPrompt(pageType);
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
-      { role: 'system', content: LINKEDIN_POST_SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.8, // Slightly higher for more variety
-    max_tokens: 1000,
+    maxTokens: 1000,
   });
 
-  const content = response.choices[0]?.message?.content;
+  const content = result.content;
 
   if (!content) {
     throw new Error('Failed to generate content');
@@ -489,17 +653,17 @@ Requirements:
 
 Return ONLY the comment text, nothing else.`;
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.8,
-    max_tokens: 200,
+    maxTokens: 200,
+    preferFast: true,  // Use faster models for short comments
   });
 
-  const comment = response.choices[0]?.message?.content;
+  const comment = result.content;
 
   if (!comment) {
     throw new Error('Failed to generate comment');
@@ -544,17 +708,17 @@ Requirements:
 
 Return ONLY the reply text, nothing else.`;
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.8,
-    max_tokens: 150,
+    maxTokens: 150,
+    preferFast: true,
   });
 
-  const reply = response.choices[0]?.message?.content;
+  const reply = result.content;
 
   if (!reply) {
     throw new Error('Failed to generate reply');
@@ -598,17 +762,17 @@ Requirements for EACH comment:
 
 Return ONLY the ${count} comments, each on its own line, numbered 1-${count}. No other text.`;
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: ENGAGEMENT_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.9,
-    max_tokens: 500,
+    maxTokens: 500,
+    preferFast: true,
   });
 
-  const content = response.choices[0]?.message?.content;
+  const content = result.content;
 
   if (!content) {
     throw new Error('Failed to generate comments');
@@ -678,17 +842,17 @@ Return ONLY valid JSON with this structure:
   "alternativeAngles": ["<angle1>", "<angle2>"]
 }`;
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: ANALYSIS_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.3,
-    max_tokens: 500,
+    maxTokens: 500,
+    preferFast: true,
   });
 
-  const responseContent = response.choices[0]?.message?.content;
+  const responseContent = result.content;
 
   if (!responseContent) {
     throw new Error('Failed to analyze post');
@@ -783,17 +947,16 @@ Return ONLY valid JSON:
   "suggestedPostCount": <recommended number of posts from this blog, usually 2-4>
 }`;
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: BLOG_ANALYZER_PROMPT },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.5,
-    max_tokens: 1500,
+    maxTokens: 1500,
   });
 
-  const responseContent = response.choices[0]?.message?.content;
+  const responseContent = result.content;
 
   if (!responseContent) {
     throw new Error('Failed to analyze blog');
@@ -850,17 +1013,16 @@ Requirements:
 
 Return ONLY the post content, nothing else.`;
 
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: LINKEDIN_POST_SYSTEM_PROMPT },
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.7,
-    max_tokens: 1000,
+    maxTokens: 1000,
   });
 
-  const content = response.choices[0]?.message?.content;
+  const content = result.content;
 
   if (!content) {
     throw new Error('Failed to generate post from blog');
@@ -1063,24 +1225,39 @@ export async function adaptContentForPlatform(
   const platformConfig = PLATFORM_CONFIGS[targetPlatform];
   const systemPrompt = PLATFORM_SYSTEM_PROMPTS[targetPlatform];
   
+  // Platform-specific strict limits for the prompt
+  const getStrictLimitWarning = (platform: PlatformType): string => {
+    if (platform === 'twitter') {
+      return '⚠️ CRITICAL: Twitter has a STRICT 280 character limit. Your response MUST be under 280 characters total including hashtags. Aim for 200-250 characters.';
+    }
+    return '';
+  };
+  
   const parts: string[] = [
     'Adapt the following content for ' + targetPlatform.charAt(0).toUpperCase() + targetPlatform.slice(1) + ':',
     '',
-    '## Original Content:',
-    originalContent,
-    '',
-    '## Platform Requirements:',
-    `- Maximum ${platformConfig.maxCharacters} characters`,
-    `- Hashtag strategy: ${platformConfig.hashtagStrategy} (${platformConfig.recommendedHashtags.min}-${platformConfig.recommendedHashtags.max} hashtags)`,
-    `- Tone: ${platformConfig.tonePreference}`,
-    '',
-    '## Instructions:',
-    '- Maintain the core message and insights',
-    '- Adapt the tone and style for ' + targetPlatform,
-    '- Adjust length appropriately',
-    preserveHashtags ? '- Keep the same hashtags from the original' : '- Create platform-appropriate hashtags',
-    '- Make it feel native to ' + targetPlatform + ', not cross-posted',
   ];
+  
+  const strictWarning = getStrictLimitWarning(targetPlatform);
+  if (strictWarning) {
+    parts.push(strictWarning);
+    parts.push('');
+  }
+  
+  parts.push('## Original Content:');
+  parts.push(originalContent);
+  parts.push('');
+  parts.push('## Platform Requirements:');
+  parts.push(`- Maximum ${platformConfig.maxCharacters} characters${targetPlatform === 'twitter' ? ' (STRICT - will be rejected if over)' : ''}`);
+  parts.push(`- Hashtag strategy: ${platformConfig.hashtagStrategy} (${platformConfig.recommendedHashtags.min}-${platformConfig.recommendedHashtags.max} hashtags)`);
+  parts.push(`- Tone: ${platformConfig.tonePreference}`);
+  parts.push('');
+  parts.push('## Instructions:');
+  parts.push('- Maintain the core message and insights');
+  parts.push('- Adapt the tone and style for ' + targetPlatform);
+  parts.push('- Adjust length appropriately');
+  parts.push(preserveHashtags ? '- Keep the same hashtags from the original' : '- Create platform-appropriate hashtags');
+  parts.push('- Make it feel native to ' + targetPlatform + ', not cross-posted');
   
   if (customInstructions) {
     parts.push('');
@@ -1091,17 +1268,16 @@ export async function adaptContentForPlatform(
   parts.push('');
   parts.push('Return ONLY the adapted content, nothing else.');
   
-  const response = await openai.chat.completions.create({
-    model: AI_MODEL,
+  const result = await createChatCompletion({
     messages: [
       { role: 'system', content: systemPrompt },
       { role: 'user', content: parts.join('\n') },
     ],
     temperature: 0.7,
-    max_tokens: Math.min(platformConfig.maxCharacters * 2, 2000),
+    maxTokens: Math.min(platformConfig.maxCharacters * 2, 2000),
   });
   
-  const content = response.choices[0]?.message?.content;
+  const content = result.content;
   
   if (!content) {
     throw new Error('Failed to adapt content for ' + targetPlatform);
@@ -1176,7 +1352,9 @@ export async function generateMultiPlatformPost(
     inspiration,
     targetPlatforms,
     primaryPlatform = 'linkedin',
-    adaptContent = true 
+    adaptContent = true,
+    pageId,
+    platform,
   } = options;
   
   // Generate the primary content (default to LinkedIn style)
@@ -1185,6 +1363,8 @@ export async function generateMultiPlatformPost(
     topic,
     angle,
     inspiration,
+    pageId,
+    platform: platform || primaryPlatform,
   });
   
   // If we only have one platform or don't want to adapt, return early

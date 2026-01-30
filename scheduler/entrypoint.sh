@@ -19,6 +19,8 @@ mkdir -p /var/log
 : > /var/log/cron-engage.log
 : > /var/log/cron-auto-generate.log
 : > /var/log/cron-collect-metrics.log
+: > /var/log/cron-icp-engage.log
+: > /var/log/cron-token-refresh.log
 
 CRONTAB=/etc/crontabs/root
 # Keep the default Alpine periodic entries, just append ours once.
@@ -33,6 +35,14 @@ if ! grep -q "/scheduler/cron-call.sh auto-generate" "$CRONTAB" 2>/dev/null; the
 fi
 if ! grep -q "/scheduler/cron-call.sh collect-metrics" "$CRONTAB" 2>/dev/null; then
   echo "0 */6 * * * sh /scheduler/cron-call.sh collect-metrics >> /var/log/cron-collect-metrics.log 2>&1" >> "$CRONTAB"
+fi
+# ICP Engagement - Find and reply to ICP tweets every 12 hours (cost optimization)
+if ! grep -q "/scheduler/cron-call.sh icp-engage" "$CRONTAB" 2>/dev/null; then
+  echo "0 */12 * * * sh /scheduler/cron-call.sh icp-engage >> /var/log/cron-icp-engage.log 2>&1" >> "$CRONTAB"
+fi
+# Token Refresh - Check and refresh expiring tokens every hour
+if ! grep -q "/scheduler/cron-call.sh token-refresh" "$CRONTAB" 2>/dev/null; then
+  echo "0 * * * * sh /scheduler/cron-call.sh token-refresh >> /var/log/cron-token-refresh.log 2>&1" >> "$CRONTAB"
 fi
 
 echo "Cron jobs installed:"

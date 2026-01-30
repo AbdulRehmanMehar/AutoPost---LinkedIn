@@ -1,0 +1,98 @@
+/**
+ * AI Usage API
+ * 
+ * GET /api/ai/usage - Get current AI model usage stats
+ * 
+ * Returns usage data for all Groq models including:
+ * - Tokens used / limit
+ * - Requests used / limit
+ * - Availability status
+ * - Rate limit hits
+ */
+
+import { NextResponse } from 'next/server';
+import { auth } from '@/lib/auth';
+import { getUsageStatus, getTotalCapacity, getSelectedModel, GROQ_MODEL_LIMITS, MODEL_PRIORITY } from '@/lib/ai-client';
+import connectDB from '@/lib/mongodb';
+import AIUsage, { getDateKey } from '@/lib/models/AIUsage';
+
+export async function GET(request: Request) {
+  try {
+    // Optional: Require authentication
+    const session = await auth();
+    if (!session) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+    
+    await connectDB();
+    
+    // Get current usage status
+    const status = await getUsageStatus();
+    const capacity = await getTotalCapacity();
+    const selectedModel = await getSelectedModel();
+    
+    // Get historical data for the last 7 days
+    const sevenDaysAgo = new Date();
+    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+    sevenDaysAgo.setUTCHours(0, 0, 0, 0);
+    
+    const historicalData = await AIUsage.find({
+      date: { $gte: sevenDaysAgo },
+    })
+      .sort({ date: -1, modelName: 1 })
+      .lean();
+    
+    // Group by date
+    const byDate: Record<string, Record<string, any>> = {};
+    for (const record of historicalData) {
+      const dateStr = record.date.toISOString().split('T')[0];
+      if (!byDate[dateStr]) {
+        byDate[dateStr] = {};
+      }
+      byDate[dateStr][record.modelName] = {
+        tokensUsed: record.tokensUsed,
+        requestCount: record.requestCount,
+        rateLimitHits: record.rateLimitHits,
+        errorCount: record.errorCount,
+      };
+    }
+    
+    return NextResponse.json({
+      success: true,
+      timestamp: new Date().toISOString(),
+      today: getDateKey().toISOString().split('T')[0],
+      
+      // Which model would be selected right now
+      selectedModel: {
+        model: selectedModel.model,
+        usagePercent: selectedModel.usagePercent,
+        reasoning: selectedModel.reasoning,
+      },
+      
+      // Current status for all models (sorted by usage)
+      models: selectedModel.allModels,
+      
+      // Aggregate stats
+      capacity: {
+        ...capacity,
+        totalModels: MODEL_PRIORITY.length,
+      },
+      
+      // Historical (last 7 days)
+      history: byDate,
+      
+      // Limits reference
+      limits: GROQ_MODEL_LIMITS,
+    });
+  } catch (error) {
+    console.error('[AI Usage API] Error:', error);
+    return NextResponse.json(
+      { 
+        success: false, 
+        error: 'Failed to fetch AI usage data',
+        details: error instanceof Error ? error.message : 'Unknown error',
+      },
+      { status: 500 }
+    );
+  }
+}

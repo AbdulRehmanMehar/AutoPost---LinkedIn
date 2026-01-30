@@ -11,19 +11,20 @@
  * - Timing recommendations
  */
 
-import OpenAI from 'openai';
 import { PageContentStrategy } from '@/lib/openai';
 import { PlatformType } from '@/lib/platforms/types';
-
-// Use Groq's OpenAI-compatible API
-const openai = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: 'https://api.groq.com/openai/v1',
-});
-
-const AI_MODEL = 'llama-3.3-70b-versatile';
+import { createChatCompletion, groqClient } from '@/lib/ai-client';
 
 export interface ReviewCriteria {
+  authenticity: {
+    score: number; // 0-10 - THE MOST IMPORTANT
+    feedback: string;
+    aiRedFlagsFound?: string[];
+  };
+  hookQuality: {
+    score: number; // 0-10
+    feedback: string;
+  };
   contentQuality: {
     score: number; // 0-10
     feedback: string;
@@ -85,51 +86,134 @@ export async function reviewContentForPublishing(
 ): Promise<ReviewDecision> {
   const { content, platform, strategy, topic, angle, sourceContent, recentPerformance } = context;
 
-  const systemPrompt = `You are an expert social media content editor and quality assurance reviewer. Your job is to review AI-generated social media posts and decide whether they should be published.
+  const systemPrompt = `You are an elite social media editor who can instantly spot AI-generated content. Your job is to ensure posts are both AUTHENTIC and HIGH-CONVERTING.
 
-You must be STRICT but FAIR. Your goal is to ensure only high-quality, on-brand, risk-free content gets published automatically.
+You evaluate posts on two dimensions:
+1. AUTHENTICITY - Does it sound like a real human wrote it?
+2. CONVERSION POTENTIAL - Will it drive engagement AND traffic?
 
 EVALUATION CRITERIA:
 
-1. **Content Quality (0-10)**
-   - Is the writing clear, engaging, and well-structured?
-   - Is the hook compelling?
-   - Is there a clear value proposition or takeaway?
-   - Is the length appropriate for the platform?
+1. **AUTHENTICITY (0-10)** - THE MOST IMPORTANT CRITERION
+   - Does this sound like a REAL PERSON wrote it?
+   - Is there a SPECIFIC story, number, or concrete example?
+   - Or is it generic observations that any company could make?
+   
+   INSTANT FAILURES (score 0-3):
+   - Starts with "We've seen many..." or "Many startups..."
+   - Uses phrases like "hidden liability", "strategic architecture", "future-proof"
+   - Generic observations without specific examples
+   - Could have been written by any consulting firm
+   - Sounds like a press release or marketing copy
+   
+   AVERAGE (score 4-6):
+   - Has some specific details but feels formulaic
+   - Story is vague ("a client" without context)
+   - Opinion is wishy-washy
+   
+   EXCELLENT (score 7-10):
+   - Specific numbers, timelines, or concrete examples
+   - Reads like someone telling a story to a friend
+   - Has a strong, clear opinion
+   - You can picture the situation happening
 
-2. **Brand Alignment (0-10)**
-   - Does it match the specified tone and voice?
-   - Is it consistent with the content strategy?
-   - Does it serve the target audience?
+2. **Hook Quality (0-10)** - CRITICAL FOR CONVERSION
+   - Does the first line make you STOP scrolling?
+   - Is it under 210 characters? (Must fit before "see more")
+   - Does it create CURIOSITY (raise a question in the reader's mind)?
+   
+   TERRIBLE HOOKS (score 0-3):
+   - "We've seen many startups prioritize quick fixes..."
+   - "In today's fast-paced world..."
+   - "It's no secret that..."
+   - Any hook that could apply to any company
+   - Hook over 210 characters
+   
+   GREAT HOOKS (score 8-10):
+   - "We mass-deleted 14,000 lines of code last Friday."
+   - "$200k revenue. 47 lines of code. No framework."
+   - Contains a specific number, action, or surprising fact
+   - Creates immediate curiosity (makes you want to know more)
 
-3. **Risk Assessment (low/medium/high/critical)**
-   - Could this be controversial or offensive?
-   - Are there any factual claims that could be wrong?
-   - Could this damage reputation?
-   - Is there anything legally questionable?
-   - **critical** = DO NOT PUBLISH under any circumstances
-   - **high** = Needs human review
-   - **medium** = Minor concerns, may publish with caution
-   - **low** = Safe to publish
+3. **AI Detection (critical check)**
+   RED FLAGS that indicate AI-generated content:
+   - Em dashes (—) anywhere in the text
+   - "not just X, but Y" sentence structure
+   - "It's worth noting", "This is where X comes in"
+   - "Moreover", "Furthermore", "Additionally"
+   - "prioritize X over Y", "balance X and Y"
+   - "hidden liability", "brick wall", "strategic architecture"
+   - "long-term success", "future-proof", "sustainable growth"
+   - Generic closing questions like "What are your thoughts?"
+   - "game-changing", "revolutionary", "seamlessly"
+   
+   If you detect 2+ of these: AUTOMATIC REJECTION
 
-4. **Engagement Potential (0-10)**
+4. **Structure Check (PAS + Curiosity Loops)**
+   Does the post follow proven formulas?
+   - PAS (Problem-Agitate-Solve): Identifies problem → builds tension → delivers insight
+   - Curiosity Loops: Raises questions → delays answers → mini-payoffs → new questions
+   - NOT: Just stating observations or listing tips
+
+5. **Engagement Potential (0-10)** - FOR FOLLOWERS
    - Will this spark conversation?
-   - Is there a clear CTA or engagement hook?
-   - Does it provide value that encourages sharing?
+   - Does the CTA invite the reader to share THEIR story?
+   - Bad: "What are your thoughts?" (too generic)
+   - Good: "What's the most expensive shortcut you've taken?"
+   - Is there a strong OPINION that people will agree/disagree with?
 
-5. **Platform Fit (0-10)**
-   - Is this optimized for ${platform}?
-   - Does it follow platform best practices?
-   - Is the format appropriate?
+6. **Traffic Potential (0-10)** - FOR CONVERSIONS
+   - Does it demonstrate expertise that makes people want to learn more?
+   - Does it create desire for the solution/service implicitly?
+   - Is there a clear transformation shown (before → after)?
+
+7. **Brand/Voice Alignment (0-10)**
+   - Does it match the specified tone?
+   - Is it appropriate for the target audience?
+
+8. **Risk Assessment (low/medium/high/critical)**
+   - Controversial or offensive content?
+   - Factual claims that could be wrong?
+   - Legal concerns?
 
 DECISION RULES:
-- **PUBLISH**: Overall score ≥ 70, risk is low/medium, no critical issues
-- **NEEDS_REVISION**: Score 50-69 OR medium risk with fixable issues
-- **REJECT**: Score < 50 OR high/critical risk OR unfixable issues
 
-Be thorough but decisive. Output valid JSON only.`;
+**PUBLISH**: 
+- Authenticity score ≥ 7
+- Hook score ≥ 6
+- No AI detection red flags (or only 1)
+- Overall score ≥ 70
+- Risk is low
+- Has clear PAS structure or curiosity loop
 
-  const userPrompt = `Review this ${platform} post for automatic publishing:
+**NEEDS_REVISION**:
+- Authenticity score 5-6 (has potential but needs work)
+- OR Hook is weak but story is good
+- OR 2 AI detection red flags that could be fixed
+- OR Good story but weak closing question
+
+**REJECT**:
+- Authenticity score < 5 (sounds like AI/marketing)
+- OR Hook score < 4 (generic opener)
+- OR 3+ AI detection red flags
+- OR starts with banned phrases ("We've seen many...", etc.)
+- OR overall score < 50
+- OR high/critical risk
+- OR no specific story/example (just observations)
+
+Be HARSH. It's better to reject generic content than publish it. Generic content hurts engagement and brand perception.
+
+Output valid JSON only.`;
+
+  const userPrompt = `Review this ${platform} post for automatic publishing.
+
+FIRST, check for these INSTANT REJECTION criteria:
+1. Does it start with "We've seen many..." or similar generic opener?
+2. Does it contain 3+ AI red flag phrases?
+3. Is there NO specific story, number, or concrete example?
+4. Could any company in the industry have written this exact post?
+
+If ANY of the above are true, reject immediately with authenticity score < 5.
 
 ---
 CONTENT TO REVIEW:
@@ -168,6 +252,8 @@ Evaluate this content and provide your decision in this exact JSON format:
   "approved": boolean,
   "decision": "publish" | "needs_revision" | "reject",
   "criteria": {
+    "authenticity": { "score": number, "feedback": "string", "aiRedFlagsFound": ["string"] },
+    "hookQuality": { "score": number, "feedback": "string" },
     "contentQuality": { "score": number, "feedback": "string" },
     "brandAlignment": { "score": number, "feedback": "string" },
     "riskAssessment": { "level": "low|medium|high|critical", "concerns": ["string"] },
@@ -175,8 +261,8 @@ Evaluate this content and provide your decision in this exact JSON format:
     "platformFit": { "score": number, "feedback": "string" },
     "overallScore": number
   },
-  "reasoning": "string explaining your decision",
-  "suggestedRevisions": ["string"] (only if needs_revision),
+  "reasoning": "string explaining your decision - be specific about what's wrong",
+  "suggestedRevisions": ["string"] (required if needs_revision - give specific, actionable fixes),
   "recommendedScheduleTime": {
     "reason": "string",
     "urgency": "immediate|optimal_time|flexible"
@@ -185,23 +271,27 @@ Evaluate this content and provide your decision in this exact JSON format:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: AI_MODEL,
+    // Note: For JSON mode, we use the raw groqClient since createChatCompletion doesn't support response_format yet
+    const result = await createChatCompletion({
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.3, // Lower temperature for more consistent reviews
-      max_tokens: 2000,
-      response_format: { type: 'json_object' },
+      maxTokens: 2000,
     });
 
-    const result = response.choices[0]?.message?.content;
-    if (!result) {
+    const resultContent = result.content;
+    if (!resultContent) {
       throw new Error('No response from AI reviewer');
     }
 
-    const decision = JSON.parse(result) as ReviewDecision;
+    // Extract JSON from response (handle markdown code blocks)
+    const jsonMatch = resultContent.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      throw new Error('No JSON found in response');
+    }
+    const decision = JSON.parse(jsonMatch[0]) as ReviewDecision;
     
     // Validate the decision
     if (typeof decision.approved !== 'boolean' || !decision.decision || !decision.criteria) {
@@ -221,6 +311,8 @@ Evaluate this content and provide your decision in this exact JSON format:
       approved: false,
       decision: 'needs_revision',
       criteria: {
+        authenticity: { score: 0, feedback: 'Review failed', aiRedFlagsFound: [] },
+        hookQuality: { score: 0, feedback: 'Review failed' },
         contentQuality: { score: 0, feedback: 'Review failed' },
         brandAlignment: { score: 0, feedback: 'Review failed' },
         riskAssessment: { level: 'high', concerns: ['AI review system error - requires human review'] },
@@ -283,21 +375,21 @@ Check for:
 Respond with JSON: { "passesQuickCheck": boolean, "concerns": ["string"] }`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: AI_MODEL,
+    const result = await createChatCompletion({
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: `Platform: ${platform}\n\nContent:\n${content}` },
       ],
       temperature: 0.1,
-      max_tokens: 300,
-      response_format: { type: 'json_object' },
+      maxTokens: 300,
+      preferFast: true,
     });
 
-    const result = JSON.parse(response.choices[0]?.message?.content || '{}');
+    const jsonMatch = result.content?.match(/\{[\s\S]*\}/);
+    const parsed = JSON.parse(jsonMatch?.[0] || '{}');
     return {
-      passesQuickCheck: result.passesQuickCheck ?? false,
-      concerns: result.concerns || [],
+      passesQuickCheck: parsed.passesQuickCheck ?? false,
+      concerns: parsed.concerns || [],
     };
   } catch {
     return { passesQuickCheck: false, concerns: ['Quick check failed'] };
@@ -311,12 +403,15 @@ Respond with JSON: { "passesQuickCheck": boolean, "concerns": ["string"] }`;
 export function getAutoPublishThresholds() {
   return {
     minOverallScore: 70,
+    minAuthenticity: 7, // CRITICAL - must sound human
+    minHookQuality: 6,
     minContentQuality: 6,
     minBrandAlignment: 6,
     minEngagementPotential: 5,
     minPlatformFit: 6,
     maxRiskLevel: 'medium' as const,
     minConfidence: 0.7,
+    maxAiRedFlags: 1, // Maximum allowed AI red flags
   };
 }
 
@@ -337,11 +432,17 @@ export function meetsAutoPublishCriteria(
   
   // Check all thresholds
   if (criteria.overallScore < thresholds.minOverallScore) return false;
+  if (criteria.authenticity?.score < thresholds.minAuthenticity) return false; // Critical check
+  if (criteria.hookQuality?.score < thresholds.minHookQuality) return false;
   if (criteria.contentQuality.score < thresholds.minContentQuality) return false;
   if (criteria.brandAlignment.score < thresholds.minBrandAlignment) return false;
   if (criteria.engagementPotential.score < thresholds.minEngagementPotential) return false;
   if (criteria.platformFit.score < thresholds.minPlatformFit) return false;
   if (confidence < thresholds.minConfidence) return false;
+  
+  // Check AI red flags
+  const aiRedFlagsCount = criteria.authenticity?.aiRedFlagsFound?.length || 0;
+  if (aiRedFlagsCount > thresholds.maxAiRedFlags) return false;
   
   // Risk level check
   const riskLevels = ['low', 'medium', 'high', 'critical'];

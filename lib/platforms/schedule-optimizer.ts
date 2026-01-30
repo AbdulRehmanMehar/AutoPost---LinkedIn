@@ -1,13 +1,5 @@
-import OpenAI from 'openai';
+import { createChatCompletion } from '@/lib/ai-client';
 import { PlatformType, PLATFORM_CONFIGS } from './types';
-
-// Use Groq's OpenAI-compatible API
-const openai = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: 'https://api.groq.com/openai/v1',
-});
-
-const AI_MODEL = 'llama-3.3-70b-versatile';
 
 /**
  * Engagement data point for analysis
@@ -232,8 +224,7 @@ Format your response as JSON:
 }`;
 
   try {
-    const response = await openai.chat.completions.create({
-      model: AI_MODEL,
+    const result = await createChatCompletion({
       messages: [
         { 
           role: 'system', 
@@ -242,10 +233,11 @@ Format your response as JSON:
         { role: 'user', content: prompt },
       ],
       temperature: 0.3,
-      max_tokens: 500,
+      maxTokens: 500,
+      preferFast: true,
     });
 
-    const content = response.choices[0]?.message?.content || '{}';
+    const content = result.content || '{}';
     // Extract JSON from response
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {

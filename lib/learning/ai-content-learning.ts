@@ -89,20 +89,20 @@ export async function getPlatformLearningContext(
   let recommendedHour: number | undefined;
   let timingConfidence = 0;
   
-  if (insights.optimalSlots.length > 0) {
+  if (insights.optimalSlots && insights.optimalSlots.length > 0) {
     const bestSlot = insights.optimalSlots[0];
     recommendedDay = bestSlot.day;
     recommendedHour = bestSlot.hour;
     timingConfidence = bestSlot.confidence;
   }
   
-  // Top angles that work
-  const topAngles = insights.topPerformingAngles
+  // Top angles that work (with null safety)
+  const topAngles = (insights.topPerformingAngles || [])
     .slice(0, 3)
     .map(a => a.angle);
   
-  // Recommended hashtags
-  const recommendedHashtags = insights.hashtagPerformance
+  // Recommended hashtags (with null safety)
+  const recommendedHashtags = (insights.hashtagPerformance || [])
     .slice(0, 10)
     .map(h => h.hashtag);
   
@@ -192,12 +192,18 @@ export function generateLearningPromptAdditions(
 ): string {
   const parts: string[] = [];
   
+  // Safely access arrays with defaults
+  const topAngles = context.topAngles || [];
+  const recommendedHashtags = context.recommendedHashtags || [];
+  const topPostExamples = context.topPostExamples || [];
+  const platformTips = context.platformTips || [];
+  
   if (!context.hasEnoughData) {
     parts.push(`\n## Platform: ${context.platform.toUpperCase()}`);
     parts.push('Note: Limited historical data available. Using industry best practices.');
     parts.push('');
     parts.push('## Platform Guidelines:');
-    context.platformTips.forEach(tip => parts.push(`- ${tip}`));
+    platformTips.forEach(tip => parts.push(`- ${tip}`));
     return parts.join('\n');
   }
   
@@ -205,9 +211,9 @@ export function generateLearningPromptAdditions(
   parts.push('');
   
   // Top performing angles
-  if (context.topAngles.length > 0) {
+  if (topAngles.length > 0) {
     parts.push('## Your Best Performing Content Angles:');
-    context.topAngles.forEach((angle, i) => {
+    topAngles.forEach((angle, i) => {
       parts.push(`${i + 1}. ${angle}`);
     });
     parts.push('Consider using one of these angles as they perform well with your audience.');
@@ -216,13 +222,13 @@ export function generateLearningPromptAdditions(
   
   // Content length recommendation
   parts.push('## Optimal Content Length:');
-  parts.push(`Aim for ${context.optimalLengthRange.min}-${context.optimalLengthRange.max} characters based on your top performers.`);
+  parts.push(`Aim for ${context.optimalLengthRange?.min || 500}-${context.optimalLengthRange?.max || 1500} characters based on your top performers.`);
   parts.push('');
   
   // Hashtag recommendations
-  if (context.recommendedHashtags.length > 0) {
+  if (recommendedHashtags.length > 0) {
     parts.push('## Your High-Performing Hashtags:');
-    parts.push(`Consider using: ${context.recommendedHashtags.slice(0, 5).join(', ')}`);
+    parts.push(`Consider using: ${recommendedHashtags.slice(0, 5).join(', ')}`);
     parts.push('');
   }
   
@@ -234,14 +240,15 @@ export function generateLearningPromptAdditions(
   }
   
   // Top post examples (few-shot learning)
-  if (context.topPostExamples.length > 0) {
+  if (topPostExamples.length > 0) {
     parts.push('## Your Top Performing Posts (Learn from these patterns):');
     parts.push('');
     
-    context.topPostExamples.forEach((example, i) => {
+    topPostExamples.forEach((example, i) => {
       parts.push(`### Example ${i + 1} (${example.angle} angle):`);
       parts.push('```');
-      parts.push(example.content.slice(0, 500) + (example.content.length > 500 ? '...' : ''));
+      const content = example.content || '';
+      parts.push(content.slice(0, 500) + (content.length > 500 ? '...' : ''));
       parts.push('```');
       parts.push(`Why it worked: ${example.whyItWorked}`);
       parts.push('');
@@ -250,7 +257,7 @@ export function generateLearningPromptAdditions(
   
   // Platform tips
   parts.push('## Platform Best Practices:');
-  context.platformTips.forEach(tip => parts.push(`- ${tip}`));
+  platformTips.forEach(tip => parts.push(`- ${tip}`));
   
   return parts.join('\n');
 }
@@ -334,20 +341,25 @@ export async function getRecommendedAngle(
   platform: PlatformType,
   availableAngles: string[]
 ): Promise<string> {
+  // Ensure we have valid angles to work with
+  const angles = availableAngles && availableAngles.length > 0 
+    ? availableAngles 
+    : ['insight', 'war_story', 'how_to'];
+  
   const context = await getPlatformLearningContext(pageId, platform);
   
-  if (!context.hasEnoughData || context.topAngles.length === 0) {
+  if (!context.hasEnoughData || !context.topAngles || context.topAngles.length === 0) {
     // Random from available
-    return availableAngles[Math.floor(Math.random() * availableAngles.length)];
+    return angles[Math.floor(Math.random() * angles.length)];
   }
   
   // Find the best performing angle that's in available angles
   for (const topAngle of context.topAngles) {
-    if (availableAngles.includes(topAngle)) {
+    if (angles.includes(topAngle)) {
       return topAngle;
     }
   }
   
   // Fallback to random
-  return availableAngles[Math.floor(Math.random() * availableAngles.length)];
+  return angles[Math.floor(Math.random() * angles.length)];
 }

@@ -456,6 +456,336 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
       return false;
     }
   }
+
+  // ============================================
+  // Twitter Search & Engagement APIs
+  // ============================================
+
+  /**
+   * Search for recent tweets matching a query
+   * Twitter API v2 - Recent Search endpoint
+   * 
+   * Note: Basic tier allows 10 requests/15min, Pro tier allows more
+   */
+  async searchTweets(
+    connection: IPlatformConnection,
+    query: string,
+    options?: {
+      maxResults?: number;       // 10-100, default 10
+      sinceId?: string;          // Only tweets after this ID
+      excludeRetweets?: boolean; // Filter out RTs
+      excludeReplies?: boolean;  // Filter out replies (get original tweets only)
+    }
+  ): Promise<{
+    success: boolean;
+    tweets?: TwitterSearchResult[];
+    nextToken?: string;
+    error?: string;
+  }> {
+    try {
+      const { 
+        maxResults = 10, 
+        sinceId, 
+        excludeRetweets = true,
+        excludeReplies = true 
+      } = options || {};
+
+      // Build query with filters
+      let searchQuery = query;
+      if (excludeRetweets) searchQuery += ' -is:retweet';
+      if (excludeReplies) searchQuery += ' -is:reply';
+
+      const params = new URLSearchParams({
+        query: searchQuery,
+        max_results: String(Math.min(maxResults, 100)),
+        'tweet.fields': 'author_id,created_at,public_metrics,conversation_id,in_reply_to_user_id,text',
+        'user.fields': 'name,username,description,public_metrics,verified',
+        'expansions': 'author_id',
+      });
+
+      if (sinceId) params.append('since_id', sinceId);
+
+      const response = await fetch(
+        `${TWITTER_API_BASE}/tweets/search/recent?${params.toString()}`,
+        {
+          headers: {
+            'Authorization': `Bearer ${connection.accessToken}`,
+          },
+        }
+      );
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        
+        // Handle rate limiting
+        if (response.status === 429) {
+          const resetTime = response.headers.get('x-rate-limit-reset');
+          return {
+            success: false,
+            error: `Rate limited. Reset at: ${resetTime ? new Date(parseInt(resetTime) * 1000).toISOString() : 'unknown'}`,
+          };
+        }
+        
+        return {
+          success: false,
+          error: error.detail || error.title || `Search failed (${response.status})`,
+        };
+      }
+
+      const data = await response.json();
+      
+      // Map users by ID for easy lookup
+      const usersById = new Map<string, TwitterUser>();
+      if (data.includes?.users) {
+        for (const user of data.includes.users) {
+          usersById.set(user.id, {
+            id: user.id,
+            username: user.username,
+            name: user.name,
+            description: user.description,
+            followersCount: user.public_metrics?.followers_count || 0,
+            verified: user.verified || false,
+          });
+        }
+      }
+
+      // Map tweets with author info
+      const tweets: TwitterSearchResult[] = (data.data || []).map((tweet: Record<string, unknown>) => {
+        const author = usersById.get(tweet.author_id as string);
+        const metrics = tweet.public_metrics as Record<string, number> || {};
+        
+        return {
+          id: tweet.id as string,
+          text: tweet.text as string,
+          authorId: tweet.author_id as string,
+          author,
+          createdAt: new Date(tweet.created_at as string),
+          conversationId: tweet.conversation_id as string,
+          metrics: {
+            likes: metrics.like_count || 0,
+            retweets: metrics.retweet_count || 0,
+            replies: metrics.reply_count || 0,
+            quotes: metrics.quote_count || 0,
+          },
+        };
+      });
+
+      return {
+        success: true,
+        tweets,
+        nextToken: data.meta?.next_token,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Reply to a tweet
+   */
+  async replyToTweet(
+    connection: IPlatformConnection,
+    tweetId: string,
+    replyText: string
+  ): Promise<{
+    success: boolean;
+    replyId?: string;
+    replyUrl?: string;
+    error?: string;
+  }> {
+    try {
+      const response = await fetch(`${TWITTER_API_BASE}/tweets`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${connection.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          text: replyText,
+          reply: {
+            in_reply_to_tweet_id: tweetId,
+          },
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        return {
+          success: false,
+          error: error.detail || error.title || `Reply failed (${response.status})`,
+        };
+      }
+
+      const data = await response.json();
+      const replyId = data.data?.id;
+
+      return {
+        success: true,
+        replyId,
+        replyUrl: replyId ? `https://twitter.com/i/web/status/${replyId}` : undefined,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Like a tweet
+   */
+  async likeTweet(
+    connection: IPlatformConnection,
+    tweetId: string
+  ): Promise<{ success: boolean; error?: string }> {
+    try {
+      // First get the authenticated user's ID
+      const meResponse = await fetch(`${TWITTER_API_BASE}/users/me`, {
+        headers: { 'Authorization': `Bearer ${connection.accessToken}` },
+      });
+      
+      if (!meResponse.ok) {
+        return { success: false, error: 'Could not get user info' };
+      }
+      
+      const meData = await meResponse.json();
+      const userId = meData.data?.id;
+
+      const response = await fetch(`${TWITTER_API_BASE}/users/${userId}/likes`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${connection.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ tweet_id: tweetId }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        return {
+          success: false,
+          error: error.detail || error.title || `Like failed (${response.status})`,
+        };
+      }
+
+      return { success: true };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Get a user's recent tweets (for analyzing ICP accounts)
+   */
+  async getUserTweets(
+    connection: IPlatformConnection,
+    username: string,
+    maxResults: number = 10
+  ): Promise<{
+    success: boolean;
+    tweets?: TwitterSearchResult[];
+    user?: TwitterUser;
+    error?: string;
+  }> {
+    try {
+      // First get user ID from username
+      const userResponse = await fetch(
+        `${TWITTER_API_BASE}/users/by/username/${username}?user.fields=description,public_metrics,verified`,
+        { headers: { 'Authorization': `Bearer ${connection.accessToken}` } }
+      );
+
+      if (!userResponse.ok) {
+        return { success: false, error: 'User not found' };
+      }
+
+      const userData = await userResponse.json();
+      const user: TwitterUser = {
+        id: userData.data.id,
+        username: userData.data.username,
+        name: userData.data.name,
+        description: userData.data.description,
+        followersCount: userData.data.public_metrics?.followers_count || 0,
+        verified: userData.data.verified || false,
+      };
+
+      // Get their tweets
+      const params = new URLSearchParams({
+        max_results: String(Math.min(maxResults, 100)),
+        'tweet.fields': 'created_at,public_metrics,conversation_id',
+        exclude: 'retweets,replies',
+      });
+
+      const tweetsResponse = await fetch(
+        `${TWITTER_API_BASE}/users/${user.id}/tweets?${params.toString()}`,
+        { headers: { 'Authorization': `Bearer ${connection.accessToken}` } }
+      );
+
+      if (!tweetsResponse.ok) {
+        return { success: true, user, tweets: [] };
+      }
+
+      const tweetsData = await tweetsResponse.json();
+      const tweets: TwitterSearchResult[] = (tweetsData.data || []).map((tweet: Record<string, unknown>) => {
+        const metrics = tweet.public_metrics as Record<string, number> || {};
+        return {
+          id: tweet.id as string,
+          text: tweet.text as string,
+          authorId: user.id,
+          author: user,
+          createdAt: new Date(tweet.created_at as string),
+          conversationId: tweet.conversation_id as string,
+          metrics: {
+            likes: metrics.like_count || 0,
+            retweets: metrics.retweet_count || 0,
+            replies: metrics.reply_count || 0,
+            quotes: metrics.quote_count || 0,
+          },
+        };
+      });
+
+      return { success: true, user, tweets };
+    } catch (error) {
+      return {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+}
+
+// ============================================
+// Types for Search & Engagement
+// ============================================
+
+export interface TwitterUser {
+  id: string;
+  username: string;
+  name: string;
+  description?: string;
+  followersCount: number;
+  verified: boolean;
+}
+
+export interface TwitterSearchResult {
+  id: string;
+  text: string;
+  authorId: string;
+  author?: TwitterUser;
+  createdAt: Date;
+  conversationId: string;
+  metrics: {
+    likes: number;
+    retweets: number;
+    replies: number;
+    quotes: number;
+  };
 }
 
 export const twitterAdapter = new TwitterAdapter();

@@ -1,42 +1,56 @@
-# LinkedIn Auto-Poster
+# Social Media Auto-Poster
 
-A self-hosted tool for scheduling and auto-posting content to LinkedIn with AI-powered content generation.
+A self-hosted multi-platform social media automation tool with AI-powered content generation, scheduling, and engagement.
 
 ## Features
 
-- **Three Posting Modes**
-  - **Manual** - Write your own content with full control
-  - **Structured** - Provide key details (problem, solution, tech stack), AI writes the post
-  - **AI Generate** - Describe your topic, AI creates the entire post
+### Multi-Platform Publishing
+- **LinkedIn** - Personal profiles and company pages
+- **Twitter/X** - Full API v2 support with engagement
+- **Facebook** - Pages publishing
+- **Instagram** - Coming soon
 
-- **Smart AI Content Generation**
-  - Optimized prompts for high-engagement LinkedIn posts
-  - Human-like writing style (no AI-sounding phrases)
-  - Customizable tone, emojis, and hashtags
-  - Posts optimized for 800-1200 characters (engagement sweet spot)
+### Three Content Modes
+- **Manual** - Write your own content with full control
+- **Structured** - Provide key details, AI writes the post
+- **AI Generate** - Describe your topic, AI creates everything
 
-- **Media Support**
-  - Upload images and videos (up to 100MB)
-  - S3-compatible storage (MinIO, AWS S3, etc.)
-  - Media attached natively to LinkedIn posts
+### Smart AI Content Generation
+- Platform-specific character limits enforced (280 for Twitter, 3000 for LinkedIn)
+- Human-like writing style (no AI-sounding phrases)
+- Customizable tone, emojis, and hashtags
+- Learning from past performance
+- 16 Groq models with smart load balancing
 
-- **Scheduling**
-  - Schedule posts for future publishing
-  - Automatic publishing via built-in cron scheduler
-  - View and manage scheduled posts
+### ICP Twitter Engagement
+- Autonomous agent finds your Ideal Customer Profile on Twitter
+- Searches for relevant conversations
+- Generates contextual, value-adding replies
+- Tracks engagement outcomes
 
-- **Self-Hosted & Dockerized**
-  - Run on your own infrastructure
-  - Docker Compose setup with built-in scheduler
-  - No external cron services needed
+### Analytics and Learning
+- Per-platform metrics collection
+- Performance-based content optimization
+- Engagement history tracking
+
+### Token Management
+- Automatic token refresh
+- Email alerts when refresh fails
+- 24-hour cooldown to prevent spam
+
+### Media Support
+- Images and videos (up to 100MB)
+- S3-compatible storage
+- Platform-specific media handling
 
 ## Tech Stack
 
-- **Framework**: Next.js 16 (App Router)
+- **Framework**: Next.js 15 (App Router)
 - **Database**: MongoDB
-- **Auth**: NextAuth.js v5 with LinkedIn OAuth
-- **AI**: OpenAI GPT-4o-mini
-- **Storage**: S3-compatible (MinIO)
+- **Auth**: NextAuth.js v5
+- **AI**: Groq (16 models with load balancing)
+- **Storage**: S3-compatible (MinIO, AWS S3)
+- **Email**: Resend
 - **Styling**: Tailwind CSS
 
 ## Quick Start
@@ -46,16 +60,17 @@ A self-hosted tool for scheduling and auto-posting content to LinkedIn with AI-p
 - Node.js 20+
 - MongoDB instance
 - MinIO or S3-compatible storage
-- LinkedIn Developer App ([create here](https://www.linkedin.com/developers/apps))
-- OpenAI API key
+- Platform Developer Apps (LinkedIn, Twitter, Facebook)
+- Groq API key
+- Resend API key (for email alerts)
 
 ### Environment Setup
 
-Copy `.env.example` to `.env` and fill in your values:
+Copy `.env.example` to `.env` and configure:
 
 ```env
 # MongoDB
-MONGODB_URI=mongodb://user:password@localhost:27017/linkedin-poster?authSource=admin
+MONGODB_URI=mongodb://user:password@localhost:27017/social-poster
 
 # NextAuth
 AUTH_SECRET=generate-with-openssl-rand-base64-32
@@ -65,8 +80,18 @@ NEXTAUTH_URL=http://localhost:3000
 LINKEDIN_CLIENT_ID=your-client-id
 LINKEDIN_CLIENT_SECRET=your-client-secret
 
-# OpenAI
-OPENAI_API_KEY=your-openai-key
+# Twitter OAuth 2.0
+TWITTER_CLIENT_ID=your-client-id
+TWITTER_CLIENT_SECRET=your-client-secret
+TWITTER_REDIRECT_URI=http://localhost:3000/api/auth/twitter/callback
+
+# Facebook
+FACEBOOK_APP_ID=your-app-id
+FACEBOOK_APP_SECRET=your-app-secret
+FACEBOOK_REDIRECT_URI=http://localhost:3000/api/auth/facebook/callback
+
+# AI (Groq)
+GROQ_API_KEY=your-groq-key
 
 # S3/MinIO Storage
 S3_ENDPOINT=http://localhost:9000
@@ -74,19 +99,12 @@ S3_ACCESS_KEY=your-access-key
 S3_SECRET_KEY=your-secret-key
 S3_BUCKET=uploads
 
-# Cron Secret (for scheduler authentication)
+# Email (Resend)
+RESEND_API_KEY=your-resend-key
+
+# Cron Secret
 CRON_SECRET=your-random-secret
 ```
-
-### LinkedIn App Setup
-
-1. Go to [LinkedIn Developers](https://www.linkedin.com/developers/apps)
-2. Create a new app
-3. Under "Auth" tab, add redirect URL: `http://localhost:3000/api/auth/callback/linkedin`
-4. Under "Products" tab, request access to:
-   - Sign In with LinkedIn using OpenID Connect
-   - Share on LinkedIn
-5. Copy Client ID and Client Secret to your `.env`
 
 ### Development
 
@@ -95,11 +113,9 @@ npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open http://localhost:3000
 
 ## Docker Deployment
-
-The easiest way to deploy. Everything runs in containers with automatic scheduling.
 
 ```bash
 # Build and start
@@ -112,90 +128,127 @@ docker-compose logs -f
 docker-compose down
 ```
 
-### What's Included
-
-| Container | Purpose |
-|-----------|---------|
-| `app` | Next.js application (port 3000) |
-| `scheduler` | Cron job that publishes scheduled posts every 5 minutes |
-
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Docker Compose                        │
-├─────────────────────────┬───────────────────────────────┤
-│      app (Next.js)      │      scheduler (Alpine)       │
-│      Port 3000          │      Cron every 5 min         │
-└───────────┬─────────────┴───────────────┬───────────────┘
-            │                             │
-            ▼                             ▼
-┌───────────────────┐         ┌───────────────────────────┐
-│     MongoDB       │         │    /api/cron/publish      │
-│   (your server)   │         │    Finds due posts        │
-└───────────────────┘         │    Posts to LinkedIn      │
-                              └───────────────────────────┘
-┌───────────────────┐
-│   MinIO / S3      │
-│  (media storage)  │
-└───────────────────┘
++------------------------------------------------------------------+
+|                       Docker Compose                              |
++-----------------------------+------------------------------------+
+|       app (Next.js)         |        scheduler (Alpine)          |
+|        Port 3000            |         Cron Jobs                  |
++-------------+---------------+-----------------+------------------+
+              |                                 |
+              v                                 v
++---------------------+         +----------------------------------+
+|      MongoDB        |         |         Cron Endpoints           |
+|   - Posts           |         |  /api/cron/publish      (5 min)  |
+|   - Pages           |         |  /api/cron/engage       (15 min) |
+|   - Users           |         |  /api/cron/icp-engage   (12 hr)  |
+|   - ICPEngagement   |         |  /api/cron/token-refresh (1 hr)  |
+|   - AIUsage         |         |  /api/cron/auto-generate (6 AM)  |
+|   - TokenAlert      |         |  /api/cron/collect-metrics(6 hr) |
++---------------------+         +----------------------------------+
+
++---------------------+         +----------------------------------+
+|   MinIO / S3        |         |          External APIs           |
+|  (media storage)    |         |  - LinkedIn API                  |
++---------------------+         |  - Twitter API v2                |
+                                |  - Facebook Graph API            |
+                                |  - Groq AI                       |
+                                |  - Resend Email                  |
+                                +----------------------------------+
 ```
+
+## Cron Jobs
+
+| Schedule | Job | Description |
+|----------|-----|-------------|
+| `*/5 * * * *` | publish | Publish scheduled posts |
+| `*/15 * * * *` | engage | LinkedIn auto-engagement |
+| `0 */12 * * *` | icp-engage | Twitter ICP engagement (2x/day) |
+| `0 * * * *` | token-refresh | Check and refresh expiring tokens |
+| `0 6 * * *` | auto-generate | Daily AI content generation |
+| `0 */6 * * *` | collect-metrics | Gather platform analytics |
 
 ## API Routes
 
+### Posts
 | Route | Method | Description |
 |-------|--------|-------------|
 | `/api/posts` | GET | List all posts |
 | `/api/posts` | POST | Create a new post |
-| `/api/posts/[id]` | PUT | Update a post |
-| `/api/posts/[id]` | DELETE | Delete a post |
+| `/api/posts/[id]` | GET/PUT/DELETE | Manage single post |
+| `/api/posts/[id]/retry` | POST | Retry failed post |
+
+### Content Generation
+| Route | Method | Description |
+|-------|--------|-------------|
 | `/api/generate` | POST | Generate AI content |
-| `/api/upload` | POST | Upload media files |
-| `/api/cron/publish` | GET | Process scheduled posts |
+| `/api/ai/usage` | GET | View AI model usage stats |
+
+### Pages and Connections
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/pages` | GET/POST | Manage pages/brands |
+| `/api/auth/twitter` | GET | Start Twitter OAuth |
+| `/api/auth/facebook` | GET | Start Facebook OAuth |
+
+### Engagement
+| Route | Method | Description |
+|-------|--------|-------------|
+| `/api/engagements` | GET | List engagements |
+| `/api/icp-engagement` | GET | ICP engagement history |
+
+### System
+| Route | Method | Description |
+|-------|--------|-------------|
 | `/api/health` | GET | Health check |
+| `/api/cron/*` | GET | Cron job endpoints |
 
-## Post Modes Explained
+## ICP Twitter Engagement
 
-### Manual Mode
-You write everything. Full control over content, formatting, and hashtags.
+The system autonomously engages with your Ideal Customer Profile:
 
-### Structured Mode
-Provide structured input:
-- **Title**: What you built/did
-- **Problem**: What problem it solves
-- **Solution**: How it solves it
-- **Tech Stack**: Technologies used
-- **Outcome**: Results or impact
-- **CTA**: Discussion topic
+1. **Analyzes your page** - Topics, audience, value proposition
+2. **Generates search queries** - Based on ICP pain points
+3. **Finds relevant tweets** - From potential customers
+4. **Evaluates relevance** - Scores 0-10 for ICP match
+5. **Generates replies** - Contextual, value-adding (not promotional)
+6. **Posts replies** - With rate limiting and safeguards
 
-AI generates an engaging LinkedIn post from this structure.
+### Safeguards
+- Minimum relevance score: 7/10
+- Max 1 reply per run (cost optimized)
+- 24-hour cooldown per user
+- Filters: 100-100k followers, skip verified
+- Quality validation (no sycophantic replies)
 
-### AI Generate Mode
-Just describe what you want to post about. The AI writes a complete post following LinkedIn best practices:
-- Strong hook in the first line
-- Scannable format
-- Human-like tone (no marketing speak)
-- Thoughtful closing question
-- Relevant hashtags
+## Platform Character Limits
 
-## AI Writing Quality
+| Platform | Limit | AI Guidance |
+|----------|-------|-------------|
+| Twitter | 280 | Aim for 200-250 |
+| LinkedIn | 3,000 | Aim for 800-1,200 |
+| Facebook | 63,206 | Aim for 500 |
+| Instagram | 2,200 | Front-load first 125 |
 
-The AI is tuned to write like a senior professional, not a marketer:
+## AI Quality
 
-**Avoided patterns:**
-- Em dashes (—)
+The AI is tuned to write like a professional, not a marketer:
+
+**Avoided:**
+- Em dashes
 - "Not just X, but Y"
-- Marketing words: "empowering", "revolutionizing", "seamlessly"
-- AI phrases: "It's worth noting", "At its core", "Moreover"
+- Marketing buzzwords
+- AI phrases: "It's worth noting", "At its core"
 
-**Encouraged patterns:**
-- First person ("I built", "I learned")
-- Contractions (don't, it's, that's)
+**Encouraged:**
+- First person voice
+- Contractions (don't, it's)
 - Varied sentence length
-- Honest disclaimers for POCs/early-stage work
-- Specific closing questions
+- Specific examples
+- Thoughtful questions
 
 ## License
 
 MIT
-
