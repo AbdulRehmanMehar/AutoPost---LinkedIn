@@ -362,7 +362,7 @@ const PageSchema = new Schema<IPage>(
         adaptContent: { type: Boolean, default: true },
       },
       default: {
-        platforms: ['linkedin'],
+        platforms: ['linkedin', 'facebook', 'twitter'],
         adaptContent: true,
       },
     },

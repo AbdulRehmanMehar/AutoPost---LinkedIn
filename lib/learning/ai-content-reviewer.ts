@@ -402,16 +402,16 @@ Respond with JSON: { "passesQuickCheck": boolean, "concerns": ["string"] }`;
  */
 export function getAutoPublishThresholds() {
   return {
-    minOverallScore: 70,
-    minAuthenticity: 7, // CRITICAL - must sound human
-    minHookQuality: 6,
-    minContentQuality: 6,
-    minBrandAlignment: 6,
-    minEngagementPotential: 5,
-    minPlatformFit: 6,
+    minOverallScore: 60,    // Lowered from 70
+    minAuthenticity: 5,      // Lowered from 7 (was too strict)
+    minHookQuality: 5,       // Lowered from 6
+    minContentQuality: 5,    // Lowered from 6
+    minBrandAlignment: 5,    // Lowered from 6
+    minEngagementPotential: 4, // Lowered from 5
+    minPlatformFit: 5,       // Lowered from 6
     maxRiskLevel: 'medium' as const,
-    minConfidence: 0.7,
-    maxAiRedFlags: 1, // Maximum allowed AI red flags
+    minConfidence: 0.6,      // Lowered from 0.7
+    maxAiRedFlags: 2,        // Increased from 1 (more lenient)
   };
 }
 

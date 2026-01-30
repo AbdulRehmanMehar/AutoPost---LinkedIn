@@ -450,7 +450,13 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
   const getCharacterGuidance = (platform: PlatformType): string => {
     switch (platform) {
       case 'twitter':
-        return 'STRICT: Maximum 280 characters total (including hashtags). Aim for 200-250 chars. Every word must count.';
+        return `⚠️ CRITICAL TWITTER CONSTRAINT ⚠️
+- ABSOLUTE MAXIMUM: 280 characters (including ALL text, hashtags, spaces, everything)
+- TARGET LENGTH: 200-250 characters total
+- COUNT EVERY CHARACTER - this will be REJECTED if you go over 280
+- Make every single word count - be CONCISE and PUNCHY
+- Use 1-2 hashtags max (they count toward the 280 limit)
+- No long storytelling - get to the point FAST`;
       case 'linkedin':
         return 'Keep under 1500 characters (aim for 800-1200). Longer form is okay for storytelling.';
       case 'facebook':
@@ -533,8 +539,10 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
 
   const userPrompt = parts.join('\n');
   
-  // Use the appropriate system prompt based on page type
-  const systemPrompt = getLinkedInSystemPrompt(pageType);
+  // Use the appropriate system prompt based on platform and page type
+  const systemPrompt = targetPlatform === 'linkedin' 
+    ? getLinkedInSystemPrompt(pageType)
+    : PLATFORM_SYSTEM_PROMPTS[targetPlatform];
 
   const result = await createChatCompletion({
     messages: [
@@ -542,7 +550,7 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
       { role: 'user', content: userPrompt },
     ],
     temperature: 0.8, // Slightly higher for more variety
-    maxTokens: 1000,
+    maxTokens: targetPlatform === 'twitter' ? 150 : 1000, // Twitter needs fewer tokens
   });
 
   const content = result.content;
@@ -1122,12 +1130,15 @@ const PLATFORM_SYSTEM_PROMPTS: Record<PlatformType, string> = {
 
   twitter: `You are an expert Twitter/X content creator who writes punchy, engaging tweets that get engagement.
 
+⚠️ CRITICAL CONSTRAINT: You MUST stay under 280 characters TOTAL (including hashtags, spaces, everything). Aim for 200-250 characters. This is NON-NEGOTIABLE.
+
 ## Core Principles:
 
 1. **Extreme brevity is key**
-   - 280 characters max, aim for 200 or less
+   - 280 characters ABSOLUTE MAX, aim for 200-250
    - One clear thought per tweet
    - Every word must earn its place
+   - If you go over 280 chars, your tweet will FAIL
 
 2. **Hook immediately**
    - No preamble - get to the point

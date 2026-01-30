@@ -266,7 +266,16 @@ Generate a detailed ICP profile in this EXACT JSON format:
   }
 }
 
-Generate 10-15 search queries covering different intents. Be SPECIFIC with keywords your ICP would actually use.`;
+Generate 10-15 search queries covering different intents. Be SPECIFIC with keywords your ICP would actually use.
+
+CRITICAL - Twitter Search Query Rules:
+- Use simple keyword matching ONLY (no AND/OR operators)
+- Use hashtags for topics: #startup #SaaS
+- Use phrases in quotes: "struggling with"
+- Combine keywords with spaces: slow product development
+- NO parentheses, NO boolean operators
+- Examples: "product development taking forever", slow deployment #startup, "agency costs too much"
+`;
 
   const response = await createChatCompletion({
     messages: [

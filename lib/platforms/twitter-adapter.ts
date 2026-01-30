@@ -130,7 +130,7 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
     
     // Truncate if needed, but try to keep it punchy
     if (content.length > maxContentLength) {
-      content = this.truncateContent(content, maxContentLength - 3) + '...';
+      content = this.truncateContent(content, maxContentLength);
     }
     
     // Add hashtags back
