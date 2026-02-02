@@ -162,26 +162,8 @@ async function executeAutoGenerate() {
           continue;
         }
 
-        // Check if there's already a pending post for today
-        const todayStart = new Date(today);
-        todayStart.setHours(0, 0, 0, 0);
-        const todayEnd = new Date(today);
-        todayEnd.setHours(23, 59, 59, 999);
-
-        const existingTodayPost = await Post.findOne({
-          pageId: page._id,
-          createdAt: { $gte: todayStart, $lte: todayEnd },
-          status: { $in: ['pending_approval', 'scheduled'] },
-        });
-
-        if (existingTodayPost) {
-          results.push({
-            pageId: page._id.toString(),
-            pageName: page.name,
-            action: 'skipped_existing_post_today',
-          });
-          continue;
-        }
+        // REMOVED: Old check that prevented multi-platform posts on same day
+        // We now check per-platform inside the loop instead
 
         // Get the user for this page
         const user = await User.findById(page.userId);
@@ -254,8 +236,33 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
         const targetPlatforms = page.publishTo?.platforms || ['linkedin'];
         const platformResults: PlatformGenerationResult[] = [];
         
+        // Time boundaries for "today"
+        const todayStart = new Date(today);
+        todayStart.setHours(0, 0, 0, 0);
+        const todayEnd = new Date(today);
+        todayEnd.setHours(23, 59, 59, 999);
+        
         for (const platform of targetPlatforms as PlatformType[]) {
           try {
+            // Check if we already created a post for THIS PLATFORM today
+            const existingPlatformPost = await Post.findOne({
+              pageId: page._id,
+              targetPlatforms: platform,
+              createdAt: { $gte: todayStart, $lte: todayEnd },
+              status: { $in: ['pending_approval', 'scheduled', 'published'] },
+            });
+
+            if (existingPlatformPost) {
+              console.log(`Skipping ${platform} for ${page.name} - already created today`);
+              platformResults.push({
+                platform,
+                status: 'skipped',
+                error: 'Post already created for this platform today',
+                usedLearning: false,
+              });
+              continue;
+            }
+
             // Get learning context for this specific platform
             const learningContext = await getPlatformLearningContext(page._id.toString(), platform);
             

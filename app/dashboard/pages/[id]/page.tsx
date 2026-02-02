@@ -251,6 +251,46 @@ export default function PageDashboard() {
     }
   };
 
+  const handleApprovePost = async (postId: string) => {
+    try {
+      const response = await fetch(`/api/posts/${postId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve' }),
+      });
+
+      if (response.ok) {
+        await fetchPosts();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to approve post');
+      }
+    } catch (error) {
+      console.error('Failed to approve:', error);
+      alert('Failed to approve post');
+    }
+  };
+
+  const handleRejectPost = async (postId: string) => {
+    try {
+      const response = await fetch(`/api/posts/${postId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject' }),
+      });
+
+      if (response.ok) {
+        await fetchPosts();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to reject post');
+      }
+    } catch (error) {
+      console.error('Failed to reject:', error);
+      alert('Failed to reject post');
+    }
+  };
+
   const handleRetryPost = async (postId: string) => {
     setRetrying(postId);
     try {
@@ -780,6 +820,24 @@ export default function PageDashboard() {
                     
                     {/* Action buttons */}
                     <div className="flex items-center gap-1">
+                      {post.status === 'pending' && (
+                        <>
+                          <button
+                            onClick={() => handleApprovePost(post._id)}
+                            className="px-3 py-1 text-sm bg-green-600 text-white rounded hover:bg-green-700"
+                            title="Approve post"
+                          >
+                            ✓ Approve
+                          </button>
+                          <button
+                            onClick={() => handleRejectPost(post._id)}
+                            className="px-3 py-1 text-sm bg-red-600 text-white rounded hover:bg-red-700"
+                            title="Reject post"
+                          >
+                            ✗ Reject
+                          </button>
+                        </>
+                      )}
                       <button
                         onClick={() => setSelectedPost(post)}
                         className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400"

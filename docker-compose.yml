@@ -44,8 +44,14 @@ services:
       timeout: 5s
       retries: 10
       start_period: 40s
+    logging:
+      driver: gelf
+      options:
+        gelf-address: ${GELF_ADDRESS}
+        tag: "{{.Name}}"
     networks:
       - app-network
+      - elk
 
   # Cron scheduler - calls the publish and engagement endpoints
   scheduler:
@@ -60,10 +66,17 @@ services:
       - CRON_SECRET=${CRON_SECRET}
       - APP_URL=http://app:3000
     command: ["sh", "/scheduler/entrypoint.sh"]
-
+    logging:
+      driver: gelf
+      options:
+        gelf-address: ${GELF_ADDRESS}
+        tag: "{{.Name}}"
     networks:
       - app-network
+      - elk
 
 networks:
   app-network:
     driver: bridge
+  elk:
+    external: true

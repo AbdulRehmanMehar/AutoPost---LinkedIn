@@ -526,6 +526,14 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
           };
         }
         
+        // Handle unauthorized - token expired or invalid
+        if (response.status === 401) {
+          return {
+            success: false,
+            error: 'Unauthorized - Twitter access token is invalid or expired. Please reconnect your Twitter account in the dashboard.',
+          };
+        }
+        
         return {
           success: false,
           error: error.detail || error.title || `Search failed (${response.status})`,
