@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: linkedin-auto-poster
+    container_name: autopost
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:3000"
@@ -58,7 +58,7 @@ services:
     build:
       context: ./scheduler
       dockerfile: Dockerfile
-    container_name: linkedin-scheduler
+    container_name: autopost-scheduler
     restart: unless-stopped
     depends_on:
       - app
