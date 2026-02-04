@@ -68,6 +68,23 @@ export interface IICPEngagement extends Document {
     conversationLength: number;
   };
   
+  // Conversation tracking for bidirectional engagement
+  conversation?: {
+    threadId: string;                     // Twitter conversation_id or LinkedIn comment thread
+    lastCheckedAt?: Date;                 // When we last checked for new replies
+    autoResponseEnabled: boolean;          // Whether to automatically respond to new replies
+    maxAutoResponses: number;             // Max auto-responses to prevent spam (default: 3)
+    currentAutoResponseCount: number;     // How many auto-responses we've sent
+    messages: {
+      id: string;                         // Tweet/comment ID
+      authorId: string;                   // Who sent it (us or them)
+      content: string;                    // Message content
+      timestamp: Date;                    // When it was sent
+      isFromUs: boolean;                  // true if we sent it, false if they did
+      url?: string;                       // Link to the message
+    }[];
+  };
+  
   // Timestamps
   engagedAt: Date;
   lastCheckedAt?: Date;
@@ -135,6 +152,21 @@ const ICPEngagementSchema = new Schema<IICPEngagement>(
       theyFollowed: { type: Boolean, default: false },
       weRepliedAgain: { type: Boolean, default: false },
       conversationLength: { type: Number, default: 1 },
+    },
+    conversation: {
+      threadId: String,
+      lastCheckedAt: Date,
+      autoResponseEnabled: { type: Boolean, default: true },
+      maxAutoResponses: { type: Number, default: 3 },
+      currentAutoResponseCount: { type: Number, default: 0 },
+      messages: [{
+        id: { type: String, required: true },
+        authorId: { type: String, required: true },
+        content: { type: String, required: true },
+        timestamp: { type: Date, required: true },
+        isFromUs: { type: Boolean, required: true },
+        url: String,
+      }],
     },
     engagedAt: {
       type: Date,

@@ -21,6 +21,7 @@ mkdir -p /var/log
 : > /var/log/cron-collect-metrics.log
 : > /var/log/cron-icp-engage.log
 : > /var/log/cron-token-refresh.log
+: > /var/log/cron-conversation-monitor.log
 
 CRONTAB=/etc/crontabs/root
 # Keep the default Alpine periodic entries, just append ours once.
@@ -43,6 +44,10 @@ fi
 # Token Refresh - Check and refresh expiring tokens every hour
 if ! grep -q "/scheduler/cron-call.sh token-refresh" "$CRONTAB" 2>/dev/null; then
   echo "0 * * * * sh /scheduler/cron-call.sh token-refresh >> /var/log/cron-token-refresh.log 2>&1" >> "$CRONTAB"
+fi
+# Conversation Monitor - Monitor and respond to Twitter conversation replies every 6 hours
+if ! grep -q "/scheduler/cron-call.sh conversation-monitor" "$CRONTAB" 2>/dev/null; then
+  echo "0 */6 * * * sh /scheduler/cron-call.sh conversation-monitor >> /var/log/cron-conversation-monitor.log 2>&1" >> "$CRONTAB"
 fi
 
 echo "Cron jobs installed:"

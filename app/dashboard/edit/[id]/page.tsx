@@ -59,7 +59,7 @@ export default async function EditPostPage({ params }: EditPostPageProps) {
           initialAiPrompt={post.aiPrompt}
           initialPostAs={post.postAs || 'person'}
           initialOrganizationId={post.organizationId}
-          initialPageId={post.pageId}
+          initialPageId={post.pageId?.toString()}
           initialTargetPlatforms={post.targetPlatforms}
           postId={post._id.toString()}
           editMode={true}

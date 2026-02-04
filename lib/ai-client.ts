@@ -489,8 +489,20 @@ export async function createChatCompletion(
         await recordUsage(model, response.usage.total_tokens, true);
       }
       
+      const content = response.choices[0]?.message?.content || null;
+      const finishReason = response.choices[0]?.finish_reason;
+      
+      // Debug: Log finish reason and content info
+      console.log(`[AI] Response: finish_reason=${finishReason}, content_length=${content?.length || 0}`);
+      
+      // Debug: Log if content is empty despite successful response
+      if (!content && response.choices.length > 0) {
+        console.warn(`[AI] Warning: Response has choices but content is empty/null`);
+        console.warn(`[AI] Choices:`, JSON.stringify(response.choices, null, 2));
+      }
+      
       return {
-        content: response.choices[0]?.message?.content || null,
+        content,
         model,
         usage: response.usage ? {
           promptTokens: response.usage.prompt_tokens,

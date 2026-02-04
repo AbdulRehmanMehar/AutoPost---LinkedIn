@@ -46,6 +46,10 @@ interface PageInfo {
   type: 'personal' | 'organization';
   avatar?: string;
   organizationId?: string;
+  connections?: Array<{
+    platform: string;
+    isActive: boolean;
+  }>;
   contentStrategy?: {
     persona: string;
     tone: string;

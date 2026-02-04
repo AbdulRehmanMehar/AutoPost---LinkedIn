@@ -273,7 +273,7 @@ export async function runICPEngagementAgent(
             console.log(`[ICP Agent] ✓ Successfully replied to @${candidate.tweet.author?.username}`);
 
             // Save engagement record
-            await saveEngagement({
+            const engagementRecord = await saveEngagement({
               pageId,
               platform: 'twitter',
               tweet: candidate.tweet,
@@ -283,6 +283,24 @@ export async function runICPEngagementAgent(
               icpProfile,
               relevanceScore: candidate.relevanceScore,
             });
+
+            // Initialize conversation tracking for automatic follow-ups
+            if (engagementRecord && replyResult.replyId) {
+              try {
+                const { initializeConversation } = await import('./conversation-manager');
+                await initializeConversation(
+                  engagementRecord._id.toString(),
+                  candidate.tweet.conversationId, // Twitter thread ID
+                  replyResult.replyId,
+                  reply,
+                  replyResult.replyUrl
+                );
+                console.log(`[ICP Agent] ✓ Conversation tracking initialized for engagement ${engagementRecord._id}`);
+              } catch (convError) {
+                console.warn(`[ICP Agent] Failed to initialize conversation tracking:`, convError);
+                // Non-critical error - continue
+              }
+            }
 
             engagements.push({
               tweet: candidate.tweet,
@@ -720,9 +738,9 @@ async function saveEngagement(data: {
   replyUrl?: string;
   icpProfile: ICPProfile;
   relevanceScore: number;
-}): Promise<void> {
+}): Promise<IICPEngagement | null> {
   try {
-    await ICPEngagement.create({
+    const engagement = await ICPEngagement.create({
       pageId: new mongoose.Types.ObjectId(data.pageId),
       platform: data.platform,
       targetPost: {
@@ -751,8 +769,11 @@ async function saveEngagement(data: {
       status: 'sent',
       engagedAt: new Date(),
     });
+    
+    return engagement;
   } catch (error) {
     console.error('Error saving engagement:', error);
+    return null;
   }
 }
 

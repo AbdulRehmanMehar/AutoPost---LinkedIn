@@ -87,7 +87,7 @@ export async function reviewContentForPublishing(
   const { content, platform, strategy, topic, angle, sourceContent, recentPerformance } = context;
 
   // Determine if this is organization or personal voice
-  const pageType = strategy.pageType || 'personal';
+  const pageType = strategy?.pageType || 'personal';
   const isOrganization = pageType === 'organization';
   
   const voiceGuidance = isOrganization 

@@ -769,13 +769,11 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
 
   /**
    * Check for new replies in a conversation thread
-   * Uses mentions timeline which works on Twitter Free tier
    */
   async checkConversationReplies(
     connection: IPlatformConnection,
     conversationId: string,
-    sinceDate?: Date,
-    ourReplyId?: string
+    sinceDate?: Date
   ): Promise<{
     success: boolean;
     newReplies: Array<{
@@ -790,65 +788,39 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
     error?: string;
   }> {
     try {
-      // Get our user ID first
-      const meResponse = await fetch(`${TWITTER_API_BASE}/users/me`, {
-        headers: {
-          'Authorization': `Bearer ${connection.accessToken}`,
-        },
-      });
+      // Build query to find replies in this conversation
+      let query = `conversation_id:${conversationId}`;
       
-      if (!meResponse.ok) {
-        return {
-          success: false,
-          newReplies: [],
-          error: 'Could not get user info',
-        };
-      }
-      
-      const meData = await meResponse.json();
-      const ourUserId = meData.data?.id;
-      
-      if (!ourUserId) {
-        return {
-          success: false,
-          newReplies: [],
-          error: 'Could not get user ID',
-        };
+      if (sinceDate) {
+        // Twitter expects RFC 3339 format
+        const since = sinceDate.toISOString();
+        query += ` created_at:>${since}`;
       }
 
-      // Strategy: Use mentions timeline (works on Free tier)
-      // This gets all tweets that mention/reply to us
-      // Note: Don't use start_time with mentions - it can cause errors
-      let url = `${TWITTER_API_BASE}/users/${ourUserId}/mentions?` +
-        `tweet.fields=author_id,created_at,conversation_id,in_reply_to_user_id,text,referenced_tweets&` +
-        `expansions=author_id,referenced_tweets.id&` +
-        `user.fields=id,name,username,public_metrics,verified&` +
-        `max_results=100`;
-
-      console.log(`[Twitter] Checking mentions for user ${ourUserId}`);
-      
-      const response = await fetch(url, {
+      const response = await fetch(
+        `${TWITTER_API_BASE}/tweets/search/recent?query=${encodeURIComponent(query)}&` +
+        `tweet.fields=author_id,created_at,public_metrics,conversation_id,in_reply_to_user_id,text&` +
+        `expansions=author_id&user.fields=id,name,username,followers_count,verified&` +
+        `max_results=100`
+      , {
         headers: {
           'Authorization': `Bearer ${connection.accessToken}`,
+          'Content-Type': 'application/json',
         },
       });
 
       if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.log(`[Twitter] Mentions API error: ${response.status}`, errorData);
+        const error = await response.json().catch(() => ({}));
         return {
           success: false,
           newReplies: [],
-          error: errorData.detail || errorData.title || `Mentions API failed (${response.status})`,
+          error: error.detail || error.title || `Failed to fetch conversation (${response.status})`,
         };
       }
 
       const data = await response.json();
       const tweets = data.data || [];
       const users = data.includes?.users || [];
-      const referencedTweets = data.includes?.tweets || [];
-
-      console.log(`[Twitter] Found ${tweets.length} mentions total`);
 
       // Create user lookup map
       const userMap = new Map(users.map((user: any) => [user.id, {
@@ -859,31 +831,7 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
         verified: user.verified || false,
       }]));
 
-      // Filter to only replies in THIS conversation
-      // A reply is in our conversation if:
-      // 1. Its conversation_id matches our thread
-      // 2. OR it references our reply tweet
-      const relevantReplies = tweets.filter((tweet: any) => {
-        // Skip our own tweets
-        if (tweet.author_id === ourUserId) return false;
-        
-        // Check if it's in the same conversation
-        if (tweet.conversation_id === conversationId) return true;
-        
-        // Check if it's a reply to our specific tweet
-        if (ourReplyId && tweet.referenced_tweets) {
-          const isReplyToOurs = tweet.referenced_tweets.some(
-            (ref: any) => ref.type === 'replied_to' && ref.id === ourReplyId
-          );
-          if (isReplyToOurs) return true;
-        }
-        
-        return false;
-      });
-
-      console.log(`[Twitter] Found ${relevantReplies.length} relevant replies in conversation ${conversationId}`);
-
-      const newReplies = relevantReplies.map((tweet: any) => ({
+      const newReplies = tweets.map((tweet: any) => ({
         id: tweet.id,
         text: tweet.text,
         authorId: tweet.author_id,
@@ -897,7 +845,6 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
         success: true,
         newReplies,
       };
-
     } catch (error) {
       return {
         success: false,
@@ -932,10 +879,16 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
   }
 }
 
+export const twitterAdapter = new TwitterAdapter();
+
+// ============================================
+// Types for Search & Engagement
+// ============================================
+
 export interface TwitterUser {
   id: string;
-  name: string;
   username: string;
+  name: string;
   description?: string;
   followersCount: number;
   verified: boolean;
@@ -954,6 +907,119 @@ export interface TwitterSearchResult {
     replies: number;
     quotes: number;
   };
+}
+
+  /**
+   * Check for new replies in a conversation thread
+   */
+  async checkConversationReplies(
+    connection: IPlatformConnection,
+    conversationId: string,
+    sinceDate?: Date
+  ): Promise<{
+    success: boolean;
+    newReplies: Array<{
+      id: string;
+      text: string;
+      authorId: string;
+      author?: TwitterUser;
+      createdAt: Date;
+      inReplyToUserId?: string;
+      url: string;
+    }>;
+    error?: string;
+  }> {
+    try {
+      // Build query to find replies in this conversation
+      let query = `conversation_id:${conversationId}`;
+      
+      if (sinceDate) {
+        // Twitter expects RFC 3339 format
+        const since = sinceDate.toISOString();
+        query += ` created_at:>${since}`;
+      }
+
+      const response = await fetch(
+        `${TWITTER_API_BASE}/tweets/search/recent?query=${encodeURIComponent(query)}&` +
+        `tweet.fields=author_id,created_at,public_metrics,conversation_id,in_reply_to_user_id,text&` +
+        `expansions=author_id&user.fields=id,name,username,followers_count,verified&` +
+        `max_results=100`
+      , {
+        headers: {
+          'Authorization': `Bearer ${connection.accessToken}`,
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json().catch(() => ({}));
+        return {
+          success: false,
+          newReplies: [],
+          error: error.detail || error.title || `Failed to fetch conversation (${response.status})`,
+        };
+      }
+
+      const data = await response.json();
+      const tweets = data.data || [];
+      const users = data.includes?.users || [];
+
+      // Create user lookup map
+      const userMap = new Map(users.map((user: any) => [user.id, {
+        id: user.id,
+        name: user.name,
+        username: user.username,
+        followersCount: user.public_metrics?.followers_count || 0,
+        verified: user.verified || false,
+      }]));
+
+      const newReplies = tweets.map((tweet: any) => ({
+        id: tweet.id,
+        text: tweet.text,
+        authorId: tweet.author_id,
+        author: userMap.get(tweet.author_id),
+        createdAt: new Date(tweet.created_at),
+        inReplyToUserId: tweet.in_reply_to_user_id,
+        url: `https://twitter.com/i/web/status/${tweet.id}`,
+      }));
+
+      return {
+        success: true,
+        newReplies,
+      };
+    } catch (error) {
+      return {
+        success: false,
+        newReplies: [],
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * Get our user ID from Twitter API
+   */
+  async getOwnUserId(connection: IPlatformConnection): Promise<string | null> {
+    try {
+      const response = await fetch(`${TWITTER_API_BASE}/users/me`, {
+        headers: {
+          'Authorization': `Bearer ${connection.accessToken}`,
+        },
+      });
+
+      if (!response.ok) {
+        console.warn('Failed to get own user ID from Twitter API');
+        return null;
+      }
+
+      const data = await response.json();
+      return data.data?.id || null;
+    } catch (error) {
+      console.warn('Error getting own user ID:', error);
+      return null;
+    }
+  }
+
 }
 
 export const twitterAdapter = new TwitterAdapter();
