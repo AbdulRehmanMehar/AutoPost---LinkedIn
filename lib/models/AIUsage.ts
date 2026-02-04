@@ -151,24 +151,24 @@ export const GROQ_MODEL_LIMITS: Record<string, ModelLimits> = {
 };
 
 // Model priority order (quality -> capacity -> speed)
-// Put models with higher daily limits first, compound models as ultimate fallback
+// Put best quality models first, problematic models removed
+// NOTE: qwen/qwen3-32b removed - outputs <think> tags that break content
 export const MODEL_PRIORITY = [
   'llama-3.3-70b-versatile',                      // Best quality, 100K/day
+  'openai/gpt-oss-120b',                          // GPT-OSS large, 200K/day - RELIABLE
   'meta-llama/llama-4-scout-17b-16e-instruct',    // Llama 4, 500K/day, 30K/min
   'meta-llama/llama-4-maverick-17b-128e-instruct',// Llama 4, 500K/day
-  'openai/gpt-oss-120b',                          // GPT-OSS large, 200K/day
   'moonshotai/kimi-k2-instruct',                  // Kimi, 300K/day
-  'qwen/qwen3-32b',                               // Qwen, 500K/day
   'llama-3.1-8b-instant',                         // Fast, 500K/day
   'groq/compound',                                // No daily limit (fallback)
   'groq/compound-mini',                           // No daily limit (fallback)
 ];
 
 // Fast models for high-volume operations (smaller, faster models first)
+// NOTE: qwen/qwen3-32b removed - outputs <think> tags
 export const FAST_MODEL_PRIORITY = [
   'llama-3.1-8b-instant',                         // 500K/day, very fast
   'meta-llama/llama-4-scout-17b-16e-instruct',    // 30K tokens/min
-  'qwen/qwen3-32b',                               // 60 req/min
   'moonshotai/kimi-k2-instruct',                  // 60 req/min
   'groq/compound-mini',                           // No daily limit
   'groq/compound',                                // No daily limit

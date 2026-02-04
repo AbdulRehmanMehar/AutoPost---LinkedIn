@@ -85,10 +85,13 @@ export async function GET(request: NextRequest) {
 
         // Run the agent with production config (cost-optimized)
         const agentResult = await runICPEngagementAgent(page._id.toString(), {
-          maxTweetsPerQuery: 10,
-          maxQueriesToRun: 2,       // Reduced for cost optimization
-          maxRepliesToSend: 1,      // Max 1 reply per run (cost saving)
-          minRelevanceScore: 7,     // Higher threshold for production
+          maxTweetsPerQuery: 15,
+          maxQueriesToRun: 3,       // Increased to find more candidates
+          maxRepliesToSend: 2,      // Max 2 replies per run
+          minRelevanceScore: 5,     // Lowered threshold to 5/10
+          minFollowers: 50,         // Lower follower minimum
+          maxFollowers: 500000,     // Increased max to allow larger accounts
+          skipVerified: false,      // Allow verified accounts
           dryRun: false,            // Actually send replies
         });
 

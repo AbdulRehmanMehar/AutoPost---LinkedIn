@@ -181,7 +181,9 @@ export async function runICPEngagementAgent(
           tweetsEvaluated++;
 
           // Basic filters
-          if (!passesBasicFilters(tweet, config)) {
+          const filterResult = passesBasicFilters(tweet, config);
+          if (!filterResult.pass) {
+            console.log(`[ICP Agent] Filtered out @${tweet.author?.username}: ${filterResult.reason}`);
             continue;
           }
 
@@ -192,14 +194,21 @@ export async function runICPEngagementAgent(
             config.cooldownMinutes
           );
           if (recentEngagement) {
+            console.log(`[ICP Agent] Cooldown active for @${tweet.author?.username}`);
             continue;
           }
 
           // Evaluate relevance
+          console.log(`[ICP Agent] Evaluating @${tweet.author?.username}: "${tweet.text.slice(0, 80)}..."`);
           const evaluation = await evaluateTweetRelevance(tweet, icpProfile, searchQuery.intent);
           
+          console.log(`[ICP Agent]   Score: ${evaluation.relevanceScore}/10, Potential: ${evaluation.engagementPotential}/10`);
+          
           if (evaluation.relevanceScore >= config.minRelevanceScore) {
+            console.log(`[ICP Agent]   ✓ Accepted`);
             allCandidates.push(evaluation);
+          } else {
+            console.log(`[ICP Agent]   ✗ Rejected (score ${evaluation.relevanceScore} < ${config.minRelevanceScore})`);
           }
         }
       } catch (error) {
@@ -208,6 +217,14 @@ export async function runICPEngagementAgent(
     }
 
     console.log(`[ICP Agent] ${allCandidates.length} candidates passed filters.`);
+    
+    if (allCandidates.length === 0) {
+      console.log(`[ICP Agent] ⚠️  No candidates found. Check:`);
+      console.log(`  - Follower range: ${config.minFollowers}-${config.maxFollowers}`);
+      console.log(`  - Min relevance score: ${config.minRelevanceScore}/10`);
+      console.log(`  - Skip verified: ${config.skipVerified}`);
+      console.log(`  - Tweets found: ${tweetsFound}, evaluated: ${tweetsEvaluated}`);
+    }
 
     // 5. Sort by relevance and engagement potential
     allCandidates.sort((a, b) => {
@@ -253,7 +270,7 @@ export async function runICPEngagementAgent(
 
           if (replyResult.success) {
             repliesSuccessful++;
-            console.log(`[ICP Agent] ✓ Replied to @${candidate.tweet.author?.username}`);
+            console.log(`[ICP Agent] ✓ Successfully replied to @${candidate.tweet.author?.username}`);
 
             // Save engagement record
             await saveEngagement({
@@ -276,7 +293,16 @@ export async function runICPEngagementAgent(
               engagedAt: new Date(),
             });
           } else {
-            errors.push(`Failed to reply to tweet ${candidate.tweet.id}: ${replyResult.error}`);
+            const errorMsg = `Failed to reply to tweet ${candidate.tweet.id}: ${replyResult.error}`;
+            console.log(`[ICP Agent] ✗ ${errorMsg}`);
+            
+            // Skip edited tweets - they're a Twitter API limitation
+            if (replyResult.error?.includes('edited')) {
+              console.log(`[ICP Agent] Skipping edited tweet - Twitter API restriction`);
+            } else {
+              errors.push(errorMsg);
+            }
+            
             engagements.push({
               tweet: candidate.tweet,
               reply,
@@ -336,29 +362,38 @@ export async function runICPEngagementAgent(
 /**
  * Check if tweet passes basic filters
  */
-function passesBasicFilters(tweet: TwitterSearchResult, config: AgentConfig): boolean {
+function passesBasicFilters(tweet: TwitterSearchResult, config: AgentConfig): { pass: boolean; reason?: string } {
   const author = tweet.author;
-  if (!author) return false;
+  if (!author) return { pass: false, reason: 'No author info' };
 
   // Followers filter
-  if (author.followersCount < config.minFollowers) return false;
-  if (author.followersCount > config.maxFollowers) return false;
+  if (author.followersCount < config.minFollowers) {
+    return { pass: false, reason: `Too few followers (${author.followersCount} < ${config.minFollowers})` };
+  }
+  if (author.followersCount > config.maxFollowers) {
+    return { pass: false, reason: `Too many followers (${author.followersCount} > ${config.maxFollowers})` };
+  }
 
   // Verified filter
-  if (config.skipVerified && author.verified) return false;
+  if (config.skipVerified && author.verified) {
+    return { pass: false, reason: 'Verified account' };
+  }
 
   // Skip tweets that are too short (likely not substantive)
-  if (tweet.text.length < 50) return false;
+  if (tweet.text.length < 50) {
+    return { pass: false, reason: `Tweet too short (${tweet.text.length} chars)` };
+  }
 
   // Skip tweets with too many hashtags (likely promotional)
   const hashtagCount = (tweet.text.match(/#/g) || []).length;
-  if (hashtagCount > 5) return false;
+  if (hashtagCount > 5) {
+    return { pass: false, reason: `Too many hashtags (${hashtagCount})` };
+  }
 
-  // Skip tweets with URLs (often promotional)
-  const hasUrl = /https?:\/\//.test(tweet.text);
-  if (hasUrl) return false;
+  // Allow tweets with URLs - they can still be valuable engagement opportunities
+  // Removed: hasUrl filter
 
-  return true;
+  return { pass: true };
 }
 
 /**
@@ -388,28 +423,42 @@ async function evaluateTweetRelevance(
   icpProfile: ICPProfile,
   intent: string
 ): Promise<EngagementCandidate> {
-  const prompt = `Evaluate this tweet for ICP engagement.
+  const prompt = `You are evaluating whether this tweet is from our Ideal Customer Profile (ICP).
 
-## Our ICP (Ideal Customer Profile):
-Target Audience: ${icpProfile.targetAudience.roles.join(', ')}
+## Our Target ICP:
+Roles: ${icpProfile.targetAudience.roles.join(', ')}
 Industries: ${icpProfile.targetAudience.industries.join(', ')}
+Company Size: ${icpProfile.targetAudience.companySize.join(', ')}
 Pain Points: ${icpProfile.painPoints.map(p => p.problem).join('; ')}
-Topics: ${icpProfile.topicsOfInterest.join(', ')}
 
 ## Tweet to Evaluate:
-Author: @${tweet.author?.username} (${tweet.author?.followersCount} followers)
+Author: @${tweet.author?.username}
+Followers: ${tweet.author?.followersCount}
 Bio: ${tweet.author?.description || 'No bio'}
 Tweet: "${tweet.text}"
-Engagement: ${tweet.metrics.likes} likes, ${tweet.metrics.replies} replies, ${tweet.metrics.retweets} RTs
-Search Intent: ${intent}
+Metrics: ${tweet.metrics.likes} likes, ${tweet.metrics.replies} replies, ${tweet.metrics.retweets} RTs
 
-## Evaluate (respond in JSON):
+## Scoring Guide:
+RELEVANCE (0-10):
+- 8-10: Perfect ICP match - author clearly fits target role/industry AND discusses relevant pain point
+- 5-7: Good match - author likely in target audience OR discussing relevant topic
+- 3-4: Weak match - tangentially related
+- 0-2: Not ICP - wrong audience or promotional content
+
+ENGAGEMENT POTENTIAL (0-10):
+- 8-10: Asking for help, sharing struggle, open to input
+- 5-7: Discussing topic, might appreciate insights
+- 3-4: Just venting, less receptive
+- 0-2: Promotional, closed-ended, or spam
+
+Score generously - if they're discussing problems our ICP has, they're probably worth engaging.
+
+Respond ONLY with this JSON (no markdown, no explanation):
 {
-  "relevanceScore": 0-10 (how well author matches ICP),
-  "engagementPotential": 0-10 (likelihood they'll appreciate our reply),
-  "reasons": ["why this is a good/bad candidate"],
-  "shouldEngage": true/false,
-  "replyAngle": "what angle to take in reply if engaging"
+  "relevanceScore": 5,
+  "engagementPotential": 6,
+  "reasons": ["specific reasons why this is/isn't a good match"],
+  "replyAngle": "what value we can add in a reply"
 }`;
 
   try {
@@ -572,6 +621,7 @@ Remember:
 Generate ONLY the reply text. No quotes, no explanation.`;
 
   try {
+    console.log(`[Reply Generator] Generating reply for @${tweet.author?.username} using ${selectedFormula} formula...`);
     const response = await createChatCompletion({
       messages: [
         { role: 'system', content: systemPrompt },
@@ -583,9 +633,11 @@ Generate ONLY the reply text. No quotes, no explanation.`;
     });
 
     const reply = response.content?.trim();
+    console.log(`[Reply Generator] Generated: "${reply}"`);
     
     // Validate reply
     if (!reply || reply.length > 280) {
+      console.log(`[Reply Validator] Rejected - ${!reply ? 'empty' : `too long (${reply.length} chars)`}`);
       return null;
     }
 
@@ -639,15 +691,16 @@ Generate ONLY the reply text. No quotes, no explanation.`;
       return null;
     }
 
-    // 3. Check it's not just a question (should have substance)
-    if (reply.endsWith('?') && reply.length < 60) {
+    // 3. Check it's not JUST a short generic question (should have substance)
+    if (reply.endsWith('?') && reply.length < 40) {
       const wordCount = reply.split(/\s+/).length;
-      if (wordCount < 10) {
-        console.log('[Reply Validator] Rejected - question too short to add value');
+      if (wordCount < 6) {
+        console.log('[Reply Validator] Rejected - question too short and generic');
         return null;
       }
     }
 
+    console.log('[Reply Validator] ✓ Reply passed all validation checks');
     return reply;
   } catch (error) {
     console.error('Error generating reply:', error);
@@ -748,7 +801,7 @@ Respond ONLY in JSON:
   },
   "overallScore": X (average),
   "issues": ["list any problems"],
-  "passesQuality": true/false (true if overallScore >= 7 and no red flags)
+  "passesQuality": true/false (true if overallScore >= 5 and no red flags)
 }`;
 
   try {
@@ -770,7 +823,7 @@ Respond ONLY in JSON:
       return {
         score: result.overallScore || 5,
         issues: result.issues || [],
-        passesQuality: result.passesQuality ?? (result.overallScore >= 7),
+        passesQuality: result.passesQuality ?? (result.overallScore >= 5),
       };
     }
   } catch (error) {
@@ -789,11 +842,17 @@ async function generateAndValidateReply(
   icpProfile: ICPProfile,
   maxAttempts: number = 3
 ): Promise<string | null> {
+  console.log(`[Reply Generation] Starting generation for tweet ${tweet.id} (max ${maxAttempts} attempts)`);
+  
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    console.log(`[Reply Generation] Attempt ${attempt}/${maxAttempts}`);
     const reply = await generateReply(tweet, icpProfile);
     
     if (!reply) {
-      console.log(`[Reply Generator] Attempt ${attempt}: Reply rejected by validator`);
+      console.log(`[Reply Generation] Attempt ${attempt}: Reply rejected by validator`);
+      if (attempt < maxAttempts) {
+        await sleep(1000);
+      }
       continue;
     }
 

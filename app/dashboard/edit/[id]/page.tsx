@@ -43,7 +43,9 @@ export default async function EditPostPage({ params }: EditPostPageProps) {
           Edit Post
         </h1>
         <p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">
-          Update your LinkedIn post
+          {post.targetPlatforms && post.targetPlatforms.length > 0 
+            ? `Update your ${post.targetPlatforms.map(p => p.charAt(0).toUpperCase() + p.slice(1)).join(', ')} post`
+            : 'Update your post'}
         </p>
       </div>
 
@@ -57,6 +59,8 @@ export default async function EditPostPage({ params }: EditPostPageProps) {
           initialAiPrompt={post.aiPrompt}
           initialPostAs={post.postAs || 'person'}
           initialOrganizationId={post.organizationId}
+          initialPageId={post.pageId}
+          initialTargetPlatforms={post.targetPlatforms}
           postId={post._id.toString()}
           editMode={true}
         />

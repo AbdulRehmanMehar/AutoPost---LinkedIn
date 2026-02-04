@@ -36,6 +36,7 @@ import {
   Heart,
   UserPlus,
   ArrowRight,
+  Trash2,
 } from 'lucide-react';
 
 interface PlatformConnection {
@@ -93,7 +94,7 @@ interface PlatformResult {
 interface Post {
   _id: string;
   content: string;
-  status: 'pending' | 'scheduled' | 'published' | 'failed';
+  status: 'pending_approval' | 'scheduled' | 'published' | 'failed' | 'draft' | 'rejected';
   confidenceScore?: number;
   scheduledFor?: string;
   publishedAt?: string;
@@ -318,6 +319,33 @@ export default function PageDashboard() {
       alert('Failed to retry post');
     } finally {
       setRetrying(null);
+    }
+  };
+
+  const handleDeletePost = async (postId: string) => {
+    if (!confirm('Are you sure you want to delete this post? This action cannot be undone.')) {
+      return;
+    }
+
+    try {
+      const response = await fetch(`/api/posts/${postId}`, {
+        method: 'DELETE',
+      });
+
+      if (response.ok) {
+        // Close modal if open
+        if (selectedPost?._id === postId) {
+          setSelectedPost(null);
+        }
+        // Refresh posts list
+        await fetchPosts();
+      } else {
+        const error = await response.json();
+        alert(error.error || 'Failed to delete post');
+      }
+    } catch (error) {
+      console.error('Failed to delete:', error);
+      alert('Failed to delete post');
     }
   };
 
@@ -820,7 +848,7 @@ export default function PageDashboard() {
                     
                     {/* Action buttons */}
                     <div className="flex items-center gap-1">
-                      {post.status === 'pending' && (
+                      {post.status === 'pending_approval' && (
                         <>
                           <button
                             onClick={() => handleApprovePost(post._id)}
@@ -866,6 +894,13 @@ export default function PageDashboard() {
                       >
                         <Edit3 className="h-4 w-4" />
                       </Link>
+                      <button
+                        onClick={() => handleDeletePost(post._id)}
+                        className="p-2 text-gray-400 hover:text-red-600 dark:hover:text-red-400"
+                        title="Delete post"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
                     </div>
                   </div>
                 </div>

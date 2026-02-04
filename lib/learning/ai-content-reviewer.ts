@@ -86,36 +86,54 @@ export async function reviewContentForPublishing(
 ): Promise<ReviewDecision> {
   const { content, platform, strategy, topic, angle, sourceContent, recentPerformance } = context;
 
+  // Determine if this is organization or personal voice
+  const pageType = strategy.pageType || 'personal';
+  const isOrganization = pageType === 'organization';
+  
+  const voiceGuidance = isOrganization 
+    ? `This is an ORGANIZATION page using "We" voice. Adjust expectations:
+- "We've seen..." is acceptable for organizations (not a red flag)
+- Case studies and client stories are natural for companies
+- Focus on SPECIFIC examples, not that it uses "We"
+- Judge authenticity by specificity of details, not pronouns`
+    : `This is a PERSONAL page using "I" voice. Standard authenticity rules apply.`;
+
   const systemPrompt = `You are an elite social media editor who can instantly spot AI-generated content. Your job is to ensure posts are both AUTHENTIC and HIGH-CONVERTING.
 
 You evaluate posts on two dimensions:
-1. AUTHENTICITY - Does it sound like a real human wrote it?
+1. AUTHENTICITY - Does it sound like a real human/company wrote it?
 2. CONVERSION POTENTIAL - Will it drive engagement AND traffic?
+
+${voiceGuidance}
 
 EVALUATION CRITERIA:
 
 1. **AUTHENTICITY (0-10)** - THE MOST IMPORTANT CRITERION
-   - Does this sound like a REAL PERSON wrote it?
-   - Is there a SPECIFIC story, number, or concrete example?
-   - Or is it generic observations that any company could make?
+   - Does this sound like a REAL ${isOrganization ? 'COMPANY' : 'PERSON'} wrote it?
+   - Does it share genuine insights or lessons?
+   - Or is it generic observations that anyone could make?
    
    INSTANT FAILURES (score 0-3):
-   - Starts with "We've seen many..." or "Many startups..."
-   - Uses phrases like "hidden liability", "strategic architecture", "future-proof"
-   - Generic observations without specific examples
-   - Could have been written by any consulting firm
-   - Sounds like a press release or marketing copy
+   ${isOrganization 
+     ? `- Makes up fake client names or companies ("fintech client", "Series B startup")
+   - Fabricates specific metrics without context ("60% improvement", "$40k saved")
+   - Sounds like a press release (corporate speak without substance)`
+     : `- Makes up fake stories about "a client" or "someone I worked with"
+   - Fabricates specific metrics ("34% conversion boost", "400ms latency")
+   - Sounds like someone else's experience, not authentic reflection`}
+   - Generic observations without personal insight
+   - Could have been written by any ${isOrganization ? 'consulting firm' : 'content creator'}
    
    AVERAGE (score 4-6):
-   - Has some specific details but feels formulaic
-   - Story is vague ("a client" without context)
-   - Opinion is wishy-washy
+   - Shares real lessons but feels formulaic
+   - Has insights but lacks personal voice
+   - Educational but impersonal
    
    EXCELLENT (score 7-10):
-   - Specific numbers, timelines, or concrete examples
-   - Reads like someone telling a story to a friend
-   - Has a strong, clear opinion
-   - You can picture the situation happening
+   - Shares genuine lessons from real experience
+   - Reads like ${isOrganization ? 'a company sharing honest learnings' : 'someone reflecting on their journey'}
+   - Has a strong, clear opinion or insight
+   - Educational value comes from authentic reflection, not fabricated case studies
 
 2. **Hook Quality (0-10)** - CRITICAL FOR CONVERSION
    - Does the first line make you STOP scrolling?
@@ -208,12 +226,17 @@ Output valid JSON only.`;
   const userPrompt = `Review this ${platform} post for automatic publishing.
 
 FIRST, check for these INSTANT REJECTION criteria:
-1. Does it start with "We've seen many..." or similar generic opener?
+1. ${isOrganization 
+  ? 'Does it fabricate fake client names or companies?'
+  : 'Does it make up fake stories with invented metrics?'}
 2. Does it contain 3+ AI red flag phrases?
-3. Is there NO specific story, number, or concrete example?
-4. Could any company in the industry have written this exact post?
+3. Is it generic advice with NO personal insight or lesson?
+4. Could any ${isOrganization ? 'consulting firm' : 'content creator'} in the industry have written this exact post?
 
 If ANY of the above are true, reject immediately with authenticity score < 5.
+
+NOTE: Educational posts sharing genuine principles and lessons are GOOD, even without specific case studies. 
+Focus on whether the insight feels authentic, not whether it has made-up client names.
 
 ---
 CONTENT TO REVIEW:

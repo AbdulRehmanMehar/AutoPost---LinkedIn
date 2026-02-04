@@ -149,6 +149,8 @@ export function PostCard({ post }: PostCardProps) {
   const [showMenu, setShowMenu] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
+  const [isApproving, setIsApproving] = useState(false);
+  const [isRejecting, setIsRejecting] = useState(false);
 
   const status = statusConfig[post.status];
   const StatusIcon = status.icon;
@@ -191,6 +193,48 @@ export function PostCard({ post }: PostCardProps) {
       console.error('Error publishing post:', error);
     } finally {
       setIsPublishing(false);
+      setShowMenu(false);
+    }
+  };
+
+  const handleApprove = async () => {
+    setIsApproving(true);
+    try {
+      const response = await fetch(`/api/posts/${post._id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'approve' }),
+      });
+
+      if (response.ok) {
+        router.refresh();
+      }
+    } catch (error) {
+      console.error('Error approving post:', error);
+    } finally {
+      setIsApproving(false);
+      setShowMenu(false);
+    }
+  };
+
+  const handleReject = async () => {
+    if (!confirm('Are you sure you want to reject this post?')) return;
+    
+    setIsRejecting(true);
+    try {
+      const response = await fetch(`/api/posts/${post._id}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'reject' }),
+      });
+
+      if (response.ok) {
+        router.refresh();
+      }
+    } catch (error) {
+      console.error('Error rejecting post:', error);
+    } finally {
+      setIsRejecting(false);
       setShowMenu(false);
     }
   };
@@ -385,23 +429,55 @@ export function PostCard({ post }: PostCardProps) {
           </p>
         </div>
 
-        <div className="relative">
-          <button
-            onClick={() => setShowMenu(!showMenu)}
-            className="rounded-lg p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >
-            <MoreVertical className="h-4 w-4 text-zinc-500" />
-          </button>
-
-          {showMenu && (
+        <div className="flex items-start gap-2">
+          {/* Approve/Reject buttons for pending approval posts */}
+          {post.status === 'pending_approval' && (
             <>
-              <div
-                className="fixed inset-0 z-10"
-                onClick={() => setShowMenu(false)}
-              />
-              <div className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
-                {(post.status === 'draft' || post.status === 'scheduled' || post.status === 'failed') && (
-                  <>
+              <button
+                onClick={handleApprove}
+                disabled={isApproving}
+                className="flex items-center gap-1.5 rounded-lg bg-green-600 px-3 py-2 text-sm font-medium text-white hover:bg-green-700 disabled:opacity-50"
+                title="Approve post"
+              >
+                {isApproving ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle className="h-4 w-4" />
+                )}
+                Approve
+              </button>
+              <button
+                onClick={handleReject}
+                disabled={isRejecting}
+                className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50"
+                title="Reject post"
+              >
+                {isRejecting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <XCircle className="h-4 w-4" />
+                )}
+                Reject
+              </button>
+            </>
+          )}
+          
+          <div className="relative">
+            <button
+              onClick={() => setShowMenu(!showMenu)}
+              className="rounded-lg p-2 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+            >
+              <MoreVertical className="h-4 w-4 text-zinc-500" />
+            </button>
+
+            {showMenu && (
+              <>
+                <div
+                  className="fixed inset-0 z-10"
+                  onClick={() => setShowMenu(false)}
+                />
+                <div className="absolute right-0 z-20 mt-1 w-48 rounded-lg border border-zinc-200 bg-white py-1 shadow-lg dark:border-zinc-700 dark:bg-zinc-800">
+                  {post.status === 'pending_approval' && (
                     <button
                       onClick={() => router.push(`/dashboard/edit/${post._id}`)}
                       className="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
@@ -409,35 +485,46 @@ export function PostCard({ post }: PostCardProps) {
                       <Edit className="h-4 w-4" />
                       Edit
                     </button>
-                    <button
-                      onClick={handlePublishNow}
-                      disabled={isPublishing}
-                      className="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
-                    >
-                      {isPublishing ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Send className="h-4 w-4" />
-                      )}
-                      Publish Now
-                    </button>
-                  </>
-                )}
-                <button
-                  onClick={handleDelete}
-                  disabled={isDeleting}
-                  className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
-                >
-                  {isDeleting ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-4 w-4" />
                   )}
-                  Delete
-                </button>
-              </div>
-            </>
-          )}
+                  {(post.status === 'draft' || post.status === 'scheduled' || post.status === 'failed') && (
+                    <>
+                      <button
+                        onClick={() => router.push(`/dashboard/edit/${post._id}`)}
+                        className="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                      >
+                        <Edit className="h-4 w-4" />
+                        Edit
+                      </button>
+                      <button
+                        onClick={handlePublishNow}
+                        disabled={isPublishing}
+                        className="flex w-full items-center gap-2 px-4 py-2 text-sm text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-700"
+                      >
+                        {isPublishing ? (
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                        ) : (
+                          <Send className="h-4 w-4" />
+                        )}
+                        Publish Now
+                      </button>
+                    </>
+                  )}
+                  <button
+                    onClick={handleDelete}
+                    disabled={isDeleting}
+                    className="flex w-full items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-950"
+                  >
+                    {isDeleting ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-4 w-4" />
+                    )}
+                    Delete
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       </div>
     </div>

@@ -18,6 +18,8 @@ import {
 import { format } from 'date-fns';
 import { MediaUpload } from './media-upload';
 import { StructuredInputForm, StructuredInput } from './structured-input-form';
+import PlatformSelector from './platform-selector';
+import { PlatformType } from '@/lib/platforms/types';
 
 type PostMode = 'manual' | 'structured' | 'ai' | 'blog_repurpose';
 
@@ -61,6 +63,7 @@ interface PostFormProps {
   initialPostAs?: 'person' | 'organization';
   initialOrganizationId?: string;
   initialPageId?: string;
+  initialTargetPlatforms?: string[];
   postId?: string;
   editMode?: boolean;
 }
@@ -98,6 +101,7 @@ export function PostForm({
   initialPostAs = 'person',
   initialOrganizationId,
   initialPageId,
+  initialTargetPlatforms = [],
   postId,
   editMode = false,
 }: PostFormProps) {
@@ -138,6 +142,11 @@ export function PostForm({
   const [selectedPageId, setSelectedPageId] = useState<string>(initialPageId || '');
   const [pages, setPages] = useState<PageInfo[]>([]);
   const [isLoadingPages, setIsLoadingPages] = useState(false);
+  
+  // Platform state
+  const [targetPlatforms, setTargetPlatforms] = useState<PlatformType[]>(
+    (initialTargetPlatforms || []) as PlatformType[]
+  );
   
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -293,6 +302,7 @@ export function PostForm({
         organizationId: postAs === 'organization' ? selectedOrgId : undefined,
         organizationName: postAs === 'organization' ? selectedOrg?.name : undefined,
         pageId: selectedPageId || undefined,
+        targetPlatforms: targetPlatforms.length > 0 ? targetPlatforms : undefined,
       };
 
       if (action === 'publish') {
@@ -515,6 +525,21 @@ export function PostForm({
             <span>✓</span> Organization posts include impression and click analytics
           </p>
         )}
+      </div>
+
+      {/* Platform Selector */}
+      <div>
+        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
+          Target Platforms
+        </label>
+        <PlatformSelector
+          availablePlatforms={selectedPage?.connections 
+            ? selectedPage.connections.filter(c => c.isActive).map(c => c.platform as PlatformType)
+            : ['linkedin', 'facebook', 'twitter', 'instagram']
+          }
+          selectedPlatforms={targetPlatforms}
+          onChange={setTargetPlatforms}
+        />
       </div>
 
       {/* Mode Selector */}

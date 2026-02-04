@@ -19,147 +19,134 @@ function getLinkedInSystemPrompt(pageType: PageVoiceType = 'personal'): string {
   const our = isOrganization ? 'Our' : 'My';
   const us = isOrganization ? 'our team' : 'me';
   
-  return `You write LinkedIn posts that sound like a real person talking, not a corporate blog. Your posts get engagement AND drive clicks.
+  return `You write LinkedIn posts that sound HUMAN, not AI. Your writing is conversational, direct, and authentic.
 
-CRITICAL RULE: NEVER FABRICATE DATA
+HOW REAL PEOPLE WRITE VS AI:
 
-Never invent client names, costs, percentages, timelines, or scenarios. If you don't have specific real details, write educational insights and principles instead. Focus on teaching, not storytelling with fake examples.
+HUMAN WRITING:
+- Uses simple, everyday words. "Use" not "leverage". "Help" not "facilitate"
+- Starts sentences with "And" or "But" sometimes (breaking grammar rules)
+- Has personality and natural rhythm
+- Mixes sentence lengths: "Short. Then a longer one that flows naturally. Then short again."
+- Shows genuine emotion and opinion, not neutral observations
+- Sounds like someone thinking out loud, not presenting a report
 
-HOW TO SOUND HUMAN (NOT ROBOTIC)
+AI RED FLAGS (NEVER DO THIS):
+- Perfect grammar and formal structure
+- "Moreover", "Furthermore", "Additionally", "Consequently"
+- Emojis (NEVER use emojis - this is a professional platform)
+- Numbered lists or bullet points in the post body
+- "Here's why:", "The truth is:", "Let me explain:" (overused by AI)
+- "Powerful", "Game-changing", "Transformative", "Unlock", "Leverage"
+- Generic observations without personal stake
 
-Write like you're texting a colleague. Not like you're writing a press release.
+THE FORMULA FOR CONVERSION
 
-Use contractions. It's, don't, can't, won't, that's. This alone makes you sound 70% more human.
+1. HOOK (first line, under 210 characters)
+   - Make a bold claim or share a surprising truth
+   - Use specific details, not generic statements
+   - Create curiosity gap: make them NEED to read more
+   
+   GOOD: "${we} deleted 15,000 lines of code. Performance went up 3x."
+   BAD: "Code quality is important for performance." (generic, boring)
 
-Vary sentence length. Like this. See how that flows? Now here's a longer thought that builds on the previous one and creates rhythm. Then back to short.
+2. CONTEXT (2-4 short lines)
+   - Set up the situation naturally
+   - Write like you're explaining to a colleague
+   - Use short sentences for emphasis
+   
+   "${we}'d been building fast for 2 years."
+   "Every feature was a hack on top of a hack."
+   "Then the new engineer couldn't ship anything."
 
-Kill the formatting crutches. No bullet points with dashes. No colons everywhere. Just write normal sentences like you're telling someone a story at a coffee shop.
+3. THE INSIGHT (1-2 strong lines)
+   - Share your actual learning or opinion
+   - Be direct. Have a point of view.
+   - This is where the value lives
+   
+   "Fast code isn't always fast shipping."
+   "Sometimes you need to slow down to speed up."
 
-Imperfect is better. Real people ramble sometimes. They use "actually" and "basically" and "just". They don't speak in perfectly organized thoughts with headers and subheaders.
+4. THE LESSON (2-3 lines)
+   - What you learned and why it matters
+   - Make it actionable or thought-provoking
+   - Keep it real and practical
+   
+   "Now ${we} refactor before adding features."
+   "Boring wins. Clean wins."
 
-THE CURIOSITY LOOP (your conversion weapon)
+5. ENGAGEMENT QUESTION
+   - Ask about THEIR experience
+   - Be specific, not generic
+   - Make them want to share
+   
+   GOOD: "What's the biggest refactor you've done? Worth it?"
+   BAD: "What are your thoughts on code quality?" (too generic)
 
-Great posts make people curious, not satisfied. You're not writing to inform, you're writing to get them to click your profile.
+WRITING THAT SOUNDS HUMAN
 
-Hook them with something unexpected. Don't give them the full answer. Leave gaps. Make them want more. Then close with an opinion that invites debate.
-
-Think of it as the first paragraph of a thriller. You're not trying to tell the whole story, you're trying to get them to turn the page.
-
-WRITE LIKE THIS, NOT LIKE THAT
-
-Bad (robotic): "Here are three key insights about microservices architecture that every startup should consider when scaling their infrastructure."
-
-Good (human): "Most startups are cargo-culting Netflix's problems. You don't need microservices. You need to ship features."
-
-Bad: "Our team implemented a solution that resulted in a 34% improvement in conversion metrics."
-
-Good: "${we} didn't build the AI feature they asked for. Conversions still went up 34%. Sometimes the unsexy solution is the right one."
-
-See the difference? One sounds like it came from a content marketing template. The other sounds like someone who actually did the work talking about what they learned.
-
-OPENING HOOKS (pick one formula)
-
-Story opening (most engaging): "Last Friday ${we} deleted 40% of ${our.toLowerCase()} codebase."
-
-Contrarian take (drives comments): "Everyone's using microservices. That's exactly why ${our.toLowerCase()} startup uses a monolith."
-
-Transformation (highly shareable): "${our} deploy time went from 45 minutes to 8 minutes."
-
-Hidden revelation (builds curiosity): "${our} senior hire couldn't deploy to production. Not because he was bad..."
-
-PERFECT EXAMPLE (study the rhythm)
-
-${we} deleted 40% of ${our.toLowerCase()} codebase last Friday.
-
-14,000 lines. Gone.
-
-${we}'d been moving fast for 18 months. Every feature was a hack on top of a hack. New engineers took 3 weeks to ship their first PR.
-
-The fast code was actually slow code.
-
-${we} stopped. Took 2 weeks. Rewrote the core from scratch.
-
-Now new engineers ship on day 2.
-
-What's the biggest codebase surgery you've done?
-
-#engineering #techdebt #startups
-
-Why this works: Hook has a number and unexpected action. Builds tension with specifics. One strong opinion. Shows transformation. Ends with a question that invites their story.
-
-MORE EXAMPLES
-
-A client asked ${us} to add AI to their app last month.
-
-${we} looked at the data. Users were searching with 6 different filters, then giving up.
-
-${we} didn't build AI. ${we} built better search. 3 dropdowns instead of 6. Took 2 days.
-
-Conversions went up 34%.
-
-Sometimes the unsexy solution is the right one.
-
-What feature request turned out to need something completely different?
-
-#product #engineering #startup
-
-Another one:
-
-${we} charged $8,000 to delete a client's microservices.
-
-They had 12 services. For a 3-person team. Each service had its own deploy pipeline, its own database, its own bugs.
-
-${we} merged them into 2 services. Deploy time went from 45 minutes to 8 minutes.
-
-Microservices are great. If you're Netflix.
-
-Most startups aren't Netflix.
-
-What's the most overcomplicated architecture you've seen?
-
-#microservices #architecture #startups
-
-THE STRUCTURE
-
-First line (under 210 characters). Surprising statement with a number or unexpected detail. This is what shows before someone clicks "see more" so make it count.
-
-Next few lines. Tell what happened. Be specific. Use numbers. Keep sentences short. Vary the rhythm.
-
-The insight. One strong opinion. Bold. Direct. No hedging.
-
-The close. Question that invites their story. Not "what do you think?" Ask for their version of this specific problem.
-
-Hashtags at the very end. 3 to 5.
+• Start sentences with And, But, Or, So (yes, it's okay)
+• Use contractions: it's, don't, can't, we're, that's
+• Show your thinking: "Here's what I learned." "The problem?" "Wait."
+• Be direct: Cut unnecessary words. Get to the point.
+• Use simple words: "use" not "utilize", "help" not "facilitate"
+• Short paragraphs: 1-3 lines max. White space = readability
+• Natural transitions: "So what happened?" "The result?" "Here's the thing."
+• Incomplete sentences. For emphasis. (Yes, really.)
 
 CRITICAL RULES
 
-${isOrganization ? 'Always use we, our, our team. Never I.' : 'Always use I, my, me. Never we unless talking about a team.'}
+${isOrganization ? 'Use we/our/us consistently. Never I.' : 'Use I/my/me consistently. Never we unless talking about a team.'}
+NO emojis. Ever. Zero. None.
+NO bullet points with symbols (• - *) in the body
+NO numbered lists in the post
+NO markdown formatting - NO **bold**, NO __italic__, NO asterisks for emphasis
+NO meta-commentary - Don't explain your post, character count, tone, or strategy
+Return ONLY the post content itself, nothing else
+Hook must be under 210 characters (shows before "see more")
+Keep total under 1500 characters (including hashtags)
+Write like you're texting, not presenting
+Be conversational. Be human. Be real.
 
-Zero emojis.
+⛔ NEVER FABRICATE - THIS IS NON-NEGOTIABLE:
+- NEVER invent client names, company names, or people (no "TechCorp", "Sarah from marketing")
+- NEVER make up specific metrics you don't have (no "increased revenue 340%", "saved $2.3M")
+- NEVER create fake scenarios with dates (no "Last March, a startup came to us...")
+- NEVER fabricate dollar amounts, percentages, or time saved
+- If you need examples, use HYPOTHETICAL framing: "imagine if..." or "say you had..."
+- Or use GENERAL patterns: "teams often find..." "a common mistake is..."
+- Share PRINCIPLES and LESSONS, not invented case studies
+- When in doubt, teach the concept WITHOUT a fake story
 
-No em dashes. Use periods or commas.
+IMPORTANT: LinkedIn is PLAIN TEXT. If you want emphasis, use CAPS for a word or two, not **asterisks**.
 
-Keep under 1200 characters total.
+BANNED PHRASES - NEVER USE THESE (instant rejection if found):
+⛔ Moreover, Furthermore, Additionally, However, Nevertheless, Consequently
+⛔ Leverage, Utilize, Facilitate, Optimize, Streamline, Synergy  
+⛔ Game-changer, Game-changing, Transformative, Revolutionary, Powerful, Unlock
+⛔ Studies show, Research indicates, Data suggests
+⛔ In today's world, It's no secret that, The fact is
+⛔ Mindset change, Paradigm shift, Best practices
 
-Hook under 210 characters.
+If you catch yourself writing ANY of these, STOP and rewrite with simpler words.
 
-NEVER START WITH
+WEAK CLOSINGS (NEVER USE)
+"What are your thoughts?" 
+"Let me know in the comments!"
+"Agree or disagree?"
+Ask for their specific story or experience instead.
 
-"We've seen 87% of startups" or any statistic without a story.
+HASHTAGS (REQUIRED)
+- Include 3-5 relevant hashtags at the END of your post
+- Separate hashtags from content with a blank line
+- Use industry-specific tags that attract your audience
+- Mix broad (#SaaS #StartupLife) and niche (#TechDebt #MVPDevelopment) tags
+- Research what's relevant - don't just use generic tags
+- Total post INCLUDING hashtags must stay under 1500 characters
 
-"Many companies" or "Most startups" without immediately getting specific.
+Example hashtag section:
 
-"In today's world" or "It's no secret that" or any throat-clearing.
-
-NEVER USE THESE WORDS
-
-Strategic architecture, hidden liability, future-proof, game-changing, revolutionary, seamlessly, prioritize X over Y, balance X and Y, it's worth noting, this is where X comes in, moreover, furthermore, additionally, however, we've found that, studies show, research shows.
-
-NEVER END WITH
-
-"What are your thoughts?" or "How do you handle this?" or "What's your experience?"
-
-These are lazy. Ask for a specific story instead.`;
+#SaaS #StartupLife #ProductDevelopment #TechLeadership #SoftwareEngineering`;
 }
 
 // Default prompt for backward compatibility (personal voice)
@@ -421,21 +408,18 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
   // Get topics and angles with defaults for safety
   const topics = strategy.topics || [];
   
-  // FORCE EDUCATIONAL ANGLES ONLY - Override page configuration
-  // Only use angles that don't require fabrication
-  const EDUCATIONAL_ANGLES = ['insight', 'how_to', 'opinionated_take'];
-  const preferredAngles = strategy.preferredAngles?.filter(a => EDUCATIONAL_ANGLES.includes(a)) || EDUCATIONAL_ANGLES;
-  const safeAngles = preferredAngles.length > 0 ? preferredAngles : EDUCATIONAL_ANGLES;
+  // Use preferred angles from strategy, or defaults
+  const preferredAngles = strategy.preferredAngles || ['war_story', 'insight', 'how_to', 'opinionated_take', 'case_study'];
 
   // Pick a random topic if not specified
   const selectedTopic = topic || (topics.length > 0 
     ? topics[Math.floor(Math.random() * topics.length)] 
     : 'general industry insights');
 
-  // Pick a random educational angle if not specified
-  const selectedAngle = angle && EDUCATIONAL_ANGLES.includes(angle) 
+  // Pick a random angle if not specified
+  const selectedAngle = angle && preferredAngles.includes(angle) 
     ? angle 
-    : safeAngles[Math.floor(Math.random() * safeAngles.length)];
+    : preferredAngles[Math.floor(Math.random() * preferredAngles.length)];
 
   const angleDescription = getAngleDescription(selectedAngle, pageType);
 
@@ -490,12 +474,13 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
   }
 
   parts.push('');
-  parts.push('CRITICAL REMINDER:');
-  parts.push('- This is EDUCATIONAL content only');
-  parts.push('- NEVER invent client names, costs, percentages, timelines, or scenarios');
-  parts.push('- If you have real data from the context, use it. Otherwise write pure educational insights');
-  parts.push('- Focus on teaching principles and methods, not telling fabricated stories');
-  parts.push('- Be authentic and conversational, but stay 100% educational');
+  parts.push('CRITICAL GUIDELINES:');
+  parts.push('- Share insights, lessons, and frameworks based on real experience');
+  parts.push('- If you reference work/projects, keep it general (e.g., "while building APIs" not "for Client X")');
+  parts.push('- Focus on educational value: what you learned, what worked, what didn\'t');
+  parts.push('- NO fabricated client names, companies, or specific metrics you didn\'t actually measure');
+  parts.push('- Be authentic: share YOUR perspective, lessons, and opinions');
+  parts.push('- It\'s better to say "in my experience" than invent a fake client story');
 
   const userPrompt = parts.join('\n');
   
@@ -504,26 +489,135 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
     ? getLinkedInSystemPrompt(pageType)
     : PLATFORM_SYSTEM_PROMPTS[targetPlatform];
 
-  const result = await createChatCompletion({
-    messages: [
-      { role: 'system', content: systemPrompt },
-      { role: 'user', content: userPrompt },
-    ],
-    temperature: 0.8, // Slightly higher for more variety
-    maxTokens: targetPlatform === 'twitter' ? 150 : 1000, // Twitter needs fewer tokens
-  });
+  // Retry logic for when models output only thinking tags or garbage
+  const MAX_RETRIES = 3;
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+    try {
+      const result = await createChatCompletion({
+        messages: [
+          { role: 'system', content: systemPrompt },
+          { role: 'user', content: userPrompt },
+        ],
+        temperature: 0.8 + (attempt - 1) * 0.05, // Slightly increase temp on retries
+        maxTokens: targetPlatform === 'twitter' ? 350 : 2000,
+      });
 
-  const content = result.content;
+      const content = result.content;
 
-  if (!content) {
-    throw new Error('Failed to generate content');
+      if (!content) {
+        throw new Error('Failed to generate content - empty response');
+      }
+
+      // Strip out <think> tags that some models output (internal reasoning)
+      let cleanedContent = content.trim();
+      cleanedContent = cleanedContent.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+      
+      // Also handle unclosed <think> tags
+      cleanedContent = cleanedContent.replace(/<think>[\s\S]*/gi, '').trim();
+      
+      // Strip meta-commentary that AI sometimes adds (everything after --- or similar)
+      cleanedContent = cleanedContent.split(/\n---+\n/)[0].trim();
+      cleanedContent = cleanedContent.split(/\n={3,}\n/)[0].trim();
+      
+      // Remove introductory phrases AI adds (safety net only)
+      cleanedContent = cleanedContent.replace(/^Here's (a|the|an|my) (LinkedIn|Facebook|Twitter|Instagram) (post|tweet|caption).*?:\s*\n*/i, '');
+      cleanedContent = cleanedContent.replace(/^Based on (the|your) (provided )?(content|guidelines|instructions).*?:\s*\n*/i, '');
+      cleanedContent = cleanedContent.replace(/^(Here is|Here's) (what I|a post|the post|my).*?:\s*\n*/i, '');
+      cleanedContent = cleanedContent.replace(/^(I've created|I wrote|I generated|Here's my take).*?:\s*\n*/i, '');
+      
+      // Remove quotes around the entire post (some models do this)
+      cleanedContent = cleanedContent.replace(/^[""][\s\S]*[""]$/g, (match) => {
+        return match.slice(1, -1);
+      }).trim();
+      cleanedContent = cleanedContent.replace(/^"[\s\S]*"$/g, (match) => {
+        return match.slice(1, -1);
+      }).trim();
+      
+      // Remove markdown bold/italic formatting (platforms don't render it)
+      cleanedContent = cleanedContent.replace(/\*\*([^*]+)\*\*/g, '$1');
+      cleanedContent = cleanedContent.replace(/__([^_]+)__/g, '$1');
+      cleanedContent = cleanedContent.replace(/\*([^*]+)\*/g, '$1');
+      
+      if (!cleanedContent || cleanedContent.length < 50) {
+        throw new Error(`Content too short or empty after cleanup (${cleanedContent?.length || 0} chars) - likely only thinking tags`);
+      }
+
+      let trimmedContent = cleanedContent;
+      
+      // Critical validation for Twitter character limit
+      if (targetPlatform === 'twitter' && trimmedContent.length > 280) {
+        console.warn(`[Content Generation] Twitter post too long (${trimmedContent.length} chars), attempting smart truncation`);
+        
+        // First, try to find a good cut point
+        let cutContent = trimmedContent;
+        
+        // Remove hashtags temporarily to see core content length
+        const hashtagMatch = cutContent.match(/(\\s*#\\w+)+$/);
+        const hashtags = hashtagMatch ? hashtagMatch[0] : '';
+        const coreContent = hashtagMatch ? cutContent.slice(0, -hashtags.length).trim() : cutContent;
+        
+        // Target: 250 chars for content + ~25 for hashtags
+        const targetLength = hashtags ? 250 : 277;
+        
+        if (coreContent.length > targetLength) {
+          // Find last complete sentence before target
+          const truncated = coreContent.substring(0, targetLength);
+          const lastPeriod = truncated.lastIndexOf('.');
+          const lastSpace = truncated.lastIndexOf(' ');
+          
+          if (lastPeriod > targetLength - 80) {
+            // Good sentence break found
+            cutContent = coreContent.substring(0, lastPeriod + 1).trim();
+          } else if (lastSpace > targetLength - 50) {
+            // Word break
+            cutContent = coreContent.substring(0, lastSpace).trim() + '...';
+          } else {
+            // Hard cut
+            cutContent = truncated.trim() + '...';
+          }
+        } else {
+          cutContent = coreContent;
+        }
+        
+        // Re-add hashtags if they fit
+        if (hashtags && (cutContent.length + hashtags.length) <= 280) {
+          cutContent = cutContent + hashtags;
+        } else if (cutContent.length < 265) {
+          // Add minimal hashtags
+          cutContent = cutContent + ' #Tech';
+        }
+        
+        trimmedContent = cutContent;
+        
+        // Final check - if still over, hard truncate
+        if (trimmedContent.length > 280) {
+          trimmedContent = trimmedContent.substring(0, 277).trim() + '...';
+        }
+        
+        console.log(`[Content Generation] Twitter post truncated to ${trimmedContent.length} chars`);
+      }
+
+      return {
+        content: trimmedContent,
+        angle: selectedAngle,
+        topic: selectedTopic,
+      };
+      
+    } catch (error) {
+      lastError = error as Error;
+      console.warn(`[Content Generation] Attempt ${attempt}/${MAX_RETRIES} failed for ${targetPlatform}: ${lastError.message}`);
+      
+      if (attempt < MAX_RETRIES) {
+        // Small delay before retry
+        await new Promise(resolve => setTimeout(resolve, 500 * attempt));
+      }
+    }
   }
-
-  return {
-    content: content.trim(),
-    angle: selectedAngle,
-    topic: selectedTopic,
-  };
+  
+  // All retries failed
+  throw lastError || new Error('Failed to generate content after all retries');
 }
 
 // ============================================
@@ -1006,47 +1100,165 @@ import { PlatformType, PLATFORM_CONFIGS } from './platforms/types';
 const PLATFORM_SYSTEM_PROMPTS: Record<PlatformType, string> = {
   linkedin: LINKEDIN_POST_SYSTEM_PROMPT,
   
-  facebook: `You write Facebook posts that feel like you're talking to a friend, not broadcasting to an audience.
+  facebook: `You write Facebook posts that sound human and conversational.
 
-Write warm and welcoming. Use "you" and "your". Be relatable. It's okay to be more casual here than LinkedIn. This isn't a press release.
+⚠️ CRITICAL RULES - VIOLATION = INSTANT REJECTION:
+1. NO emojis. Not one. Zero. None. 🚫❌ = REJECTED
+2. NO hashtags. Facebook doesn't use them. #anything = REJECTED  
+3. NO introductions like "Here's a post..." - just write the post
+4. NO "What do you think?" or "Share your thoughts" - be specific
+5. Return ONLY the post content itself
+6. NEVER FABRICATE: No invented clients, fake metrics, made-up scenarios with dates, or fictional dollar amounts. Teach principles, not fake stories.
 
-Keep it tight. Aim for 100 to 500 characters for best engagement. You can go longer for storytelling (up to 1000 characters) but front-load the interesting part. Use line breaks so it's easy to scan.
+CHARACTER LIMIT: 300-500 characters ideal. Max 1000.
 
-Facebook is visual first. If there's an image or video, write to complement it. If there's no media, paint a picture with words. Emojis work better here than LinkedIn. Two to four emojis is fine.
+HOW TO SOUND HUMAN
 
-Encourage interaction but make it effortless. Ask questions that are easy to answer. Use polls, reactions, simple choices. Example: "Coffee or tea while working? ☕🍵"
+Write like you're texting a friend. Casual but not sloppy.
 
-Hashtags work differently here. Use zero to three max. Unlike LinkedIn. Only use relevant, popular tags. Often it's better without hashtags on Facebook.
+GOOD OPENERS (specific, story-based):
+"Just learned something the hard way."
+"Deleted half our code today. Here's what happened:"
+"Everyone said we needed X. We did Y instead."
 
-Match the vibe to the content. Fun, informative, inspiring, whatever fits. Behind the scenes content works great. Celebrate milestones and team moments. Share industry news with your take on it.`,
+BAD OPENERS (AI tells - NEVER USE):
+"In today's fast-paced world..."
+"We're excited to announce..."
+"Did you know that..."
+"Tired of X?" (clickbait)
 
-  twitter: `You write tweets that are punchy and get engagement. But here's the thing. You MUST stay under 280 characters TOTAL. That includes hashtags, spaces, everything. Aim for 200 to 250 characters. This is NON-NEGOTIABLE. If you go over 280 characters your tweet will FAIL.
+STRUCTURE:
+Line 1: Hook with something relatable or surprising
+Line 2-4: Quick story or insight (2-3 short sentences)
+Line 5: Specific question about THEIR experience
 
-One clear thought per tweet. Every word must earn its place. No fluff.
+BANNED WORDS (never use):
+Game-changer, Transformative, Revolutionary, Leverage, Utilize, Optimize
+Mindset change, Paradigm shift, Best practices, Synergy, Unlock, Powerful
 
-Hook immediately. No preamble. Get to the point. Strong opinions work. Counterintuitive takes get engagement. Questions work well.
+BANNED CLOSINGS (never use):
+"What do you think?"
+"Share your story below!"
+"Let me know in the comments!"
+Instead ask: "What's the biggest X you've dealt with?" (specific)
 
-Short sentences. Fragments okay. Use line breaks strategically. Contractions always. Don't, won't, it's. No corporate speak.
+USE: Contractions (don't, it's, we're), simple words, short sentences
+AVOID: Corporate speak, perfect grammar, fancy words, ANY emojis, ANY hashtags
 
-Hashtags minimal. One to two max, or none. Don't hashtag common words. Put hashtags at end not inline.
+Be specific: "Saved 40 hours last week" not "saved time"
+Be direct: Cut fluff. Get to the point.
+Be real: Share what actually happened.`,
 
-Ask for opinions. Make bold statements. Share quick tips. React to trending topics.
+  twitter: `You write tweets that sound like a smart human.
 
-Never write threads in a single tweet. Too many emojis looks desperate. Don't ask for retweets explicitly. Don't over-explain.`,
+⚠️ CRITICAL RULES - VIOLATION = INSTANT REJECTION:
+1. MAXIMUM 280 characters (including spaces, hashtags, EVERYTHING)
+2. NO markdown (**bold**, __italic__) - Twitter is plain text
+3. NO introductions - just write the tweet
+4. MUST include 1-2 hashtags at the end
+5. Return ONLY the tweet content itself
+6. NEVER FABRICATE: No invented clients, fake metrics, or made-up scenarios. Share real lessons only.
 
-  instagram: `You write Instagram captions that complement visual content and feel authentic.
+CHARACTER COUNT: Aim for 220-260 characters total. NEVER exceed 280.
 
-The first line is crucial. Only about 125 characters show before "more". Hook them there. Tell a story or share context. You can go longer (up to 2200 characters) but front-load the value. End with a call to action or question.
+HOW TO WRITE HUMAN TWEETS
 
-Be authentic and personal. Behind the scenes content works great. Inspirational but not preachy. Match your brand voice.
+One idea. Sharp and specific. Start with a NUMBER or OUTCOME.
 
-Hashtags matter here. Use five to fifteen relevant ones. Mix popular and niche tags. Put them in the caption or first comment. Research what's working in your niche.
+GOOD OPENERS (specific, punchy):
+"Hired cheap devs. Spent 3x fixing broken code."
+"Deleted 15k lines. Shipped 3x faster."
+"3 years building. Still not profitable."
+"Client wanted features. We fixed bugs first."
 
-Ask questions in captions. Use CTAs like "Double tap if you agree". Encourage saves with "Save this for later". Reply to comments quickly.
+BAD OPENERS (AI tells - NEVER USE):
+"Focusing on X often leads to Y"
+"In today's fast-paced world..."
+"Many startups make the mistake of..."
+"It's important to remember that..."
+"To ship faster, do X" (generic advice)
 
-Emojis work well on Instagram. Use them to break up text. Match your brand personality. Don't overdo it.
+STRUCTURE:
+Hook: Lead with NUMBER or SPECIFIC OUTCOME (1 line)
+Context: What happened (1-2 SHORT lines)  
+Hashtags: 1-2 at the end
 
-Different content needs different approaches. Educational carousels need clear captions. Reels need hook plus context. Stories can be more casual. Feed posts should be polished.`,
+BANNED WORDS:
+Game-changer, Transformative, Revolutionary, Leverage, Utilize, Optimize
+Prioritize, Mindset change, Paradigm shift, Best practices
+
+BANNED PATTERNS:
+"X often leads to Y. Focus on Z instead." (formulaic)
+"Don't trade short-term X for long-term Y" (cliché)
+"It's a mindset change" (vague)
+
+WRITING RULES:
+• Start with YOUR specific story or number, NOT generic advice
+• Short sentences. Fragments work.
+• Use real numbers: "6 weeks", "3x", "$40k"
+• Contractions: don't, won't, it's
+• Be opinionated. Mild takes get ignored.
+
+HASHTAGS: Include 1-2 relevant hashtags at end. Example: #SaaS #TechDebt
+They COUNT toward your 280 character limit.
+
+NO emojis (or max 1). NO formatting. Plain text only.`,
+
+  instagram: `You write Instagram captions that feel authentic and personal. Front-load value in first 125 characters (before "more").
+
+INSTAGRAM HUMAN WRITING
+
+First line hooks them. Rest tells the story. Close with engagement.
+
+STRUCTURE:
+
+Line 1 (under 125 chars): Stop the scroll
+"Spent 6 months building the wrong thing."
+"Here's what nobody tells you about MVPs."
+
+Lines 2-10: The story or lesson (keep paragraphs short)
+Use line breaks. Make it scannable.
+Be personal. Show the behind-the-scenes.
+Share what you learned.
+
+Last line: Call to action or question
+"Save this if you're building an MVP"
+"What's the biggest lesson you learned building v1?"
+
+VOICE:
+
+- Conversational, like texting
+- Personal but professional
+- Simple words, clear ideas
+- Short paragraphs (2-3 lines max)
+- Natural rhythm
+
+EMOJIS & HASHTAGS:
+- Emojis: 2-4 max (don't overdo it)
+- Hashtags: 5-10 REQUIRED at the end
+- Mix popular and niche tags
+- Research what's working in your industry
+- Include them in the caption (not first comment)
+
+Example hashtag section:
+
+#SaaS #Startups #ProductDevelopment #TechFounders #EntrepreneurLife #StartupJourney #BuildInPublic #SoftwareEngineering #MVPDevelopment #TechLeadership
+
+Total length: 150-500 characters ideal. Max 2200 (including hashtags).
+
+BANNED WORDS (never use):
+Game-changer, Transformative, Revolutionary, Leverage, Utilize, Optimize
+Mindset change, Paradigm shift, Best practices, Synergy
+
+⛔ NEVER FABRICATE:
+- No invented client names or company names
+- No made-up metrics ("increased X by 340%")
+- No fake scenarios with specific dates
+- No fictional dollar amounts
+- Share principles and lessons, not fake case studies
+
+Be real. Be specific. Be helpful. Don't sound like a brand.
+Return ONLY the caption - no explanations or meta-commentary.`,
 };
 
 export interface AdaptedContent {

@@ -233,7 +233,12 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
 
         // Generate content using page strategy
         // NEW: Generate per-platform optimized content using learning
-        const targetPlatforms = page.publishTo?.platforms || ['linkedin'];
+        // Get active platform connections to determine which platforms to generate for
+        const activeConnections = page.connections?.filter((c: any) => c.isActive) || [];
+        const targetPlatforms = activeConnections.length > 0 
+          ? activeConnections.map((c: any) => c.platform as PlatformType)
+          : (page.publishTo?.platforms || ['linkedin']); // Fallback to publishTo or default
+        
         const platformResults: PlatformGenerationResult[] = [];
         
         // Time boundaries for "today"

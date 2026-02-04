@@ -1,6 +1,75 @@
 import { NextRequest, NextResponse } from 'next/server';
 import connectToDatabase from '@/lib/mongodb';
 import Post from '@/lib/models/Post';
+import Page from '@/lib/models/Page';
+import { getOptimalPostingTime } from '@/lib/learning/platform-learning';
+import { PlatformType } from '@/lib/platforms/types';
+
+/**
+ * Get the next occurrence of a specific day and hour
+ */
+function getNextOccurrence(dayOfWeek: number, hour: number, timezone?: string): Date {
+  const now = new Date();
+  const result = new Date(now);
+  
+  // Set the hour
+  result.setHours(hour, 0, 0, 0);
+  
+  // Calculate days until target day
+  const currentDay = now.getDay();
+  let daysUntil = dayOfWeek - currentDay;
+  
+  if (daysUntil < 0 || (daysUntil === 0 && result <= now)) {
+    daysUntil += 7; // Next week
+  }
+  
+  result.setDate(result.getDate() + daysUntil);
+  
+  return result;
+}
+
+/**
+ * Calculate optimal scheduled time for a post using AI learning
+ */
+async function calculateScheduledTime(
+  pageId: string,
+  platform: PlatformType,
+  page: { schedule?: { preferredTimes?: string[]; preferredDays?: number[]; timezone?: string } }
+): Promise<Date> {
+  const now = new Date();
+  
+  try {
+    // Try to get AI-optimal timing based on past performance
+    const optimalTime = await getOptimalPostingTime(
+      pageId,
+      platform,
+      page.schedule?.preferredDays
+    );
+    
+    if (optimalTime && optimalTime.confidence > 0.5) {
+      console.log(`Using AI-learned optimal time for ${platform}: Day ${optimalTime.day}, Hour ${optimalTime.hour}`);
+      return getNextOccurrence(optimalTime.day, optimalTime.hour, page.schedule?.timezone);
+    }
+  } catch (error) {
+    console.warn('Could not get optimal posting time:', error);
+  }
+  
+  // Fall back to preferred times from page settings
+  const preferredTimes = page.schedule?.preferredTimes || ['09:00'];
+  const preferredTime = preferredTimes[Math.floor(Math.random() * preferredTimes.length)];
+  const [hours, minutes] = preferredTime.split(':').map(Number);
+  
+  const scheduledFor = new Date(now);
+  scheduledFor.setHours(hours, minutes, 0, 0);
+  
+  // If the time has passed today, schedule for tomorrow
+  if (scheduledFor <= now) {
+    scheduledFor.setDate(scheduledFor.getDate() + 1);
+  }
+  
+  console.log(`Using preferred time fallback for ${platform}: ${scheduledFor.toISOString()}`);
+  return scheduledFor;
+}
 
 // GET /api/posts/[id]/approve?token=xxx&action=approve|reject
 // Handles email approval links
@@ -46,7 +115,29 @@ export async function GET(
 
     // Process the action
     if (action === 'approve') {
+      // Calculate optimal scheduled time using AI learning
+      let scheduledFor: Date | undefined;
+      
+      if (post.pageId) {
+        const page = await Page.findById(post.pageId);
+        if (page) {
+          const platform = post.targetPlatforms?.[0] || 'linkedin';
+          scheduledFor = await calculateScheduledTime(
+            post.pageId.toString(),
+            platform as PlatformType,
+            page
+          );
+        }
+      }
+      
+      // If no page found, schedule for 1 hour from now
+      if (!scheduledFor) {
+        scheduledFor = new Date();
+        scheduledFor.setHours(scheduledFor.getHours() + 1);
+      }
+      
       post.status = 'scheduled';
+      post.scheduledFor = scheduledFor;
       post.approval.decision = 'approved';
       post.approval.decidedAt = new Date();
       post.approval.decidedBy = 'email';
@@ -101,7 +192,29 @@ export async function POST(
     }
 
     if (action === 'approve') {
+      // Calculate optimal scheduled time using AI learning
+      let scheduledFor: Date | undefined;
+      
+      if (post.pageId) {
+        const page = await Page.findById(post.pageId);
+        if (page) {
+          const platform = post.targetPlatforms?.[0] || 'linkedin';
+          scheduledFor = await calculateScheduledTime(
+            post.pageId.toString(),
+            platform as PlatformType,
+            page
+          );
+        }
+      }
+      
+      // If no page found, schedule for 1 hour from now
+      if (!scheduledFor) {
+        scheduledFor = new Date();
+        scheduledFor.setHours(scheduledFor.getHours() + 1);
+      }
+      
       post.status = 'scheduled';
+      post.scheduledFor = scheduledFor;
       post.approval = {
         ...post.approval,
         decision: 'approved',
@@ -143,6 +256,7 @@ export async function POST(
       post: {
         id: post._id,
         status: post.status,
+        scheduledFor: post.scheduledFor,
         approval: post.approval,
       },
     });

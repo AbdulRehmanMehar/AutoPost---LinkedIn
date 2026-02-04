@@ -127,8 +127,17 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
         angle,
         inspiration: finalInspiration,
         pageId: page._id.toString(),
-        platform: 'linkedin', // Default to LinkedIn for now - can be expanded
+        platform: 'linkedin', // Legacy field - actual platforms determined by connections
       });
+
+      // Get active platform connections to determine target platforms
+      const activeConnections = page.connections?.filter((c: any) => c.isActive) || [];
+      const targetPlatforms = activeConnections.map((c: any) => c.platform);
+      
+      // Default to LinkedIn if no connections (shouldn't happen, but safety)
+      if (targetPlatforms.length === 0) {
+        targetPlatforms.push('linkedin');
+      }
 
       // Optionally create a draft post
       if (createDraft !== false) {
@@ -146,6 +155,7 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
           mode: 'ai',
           postAs: page.type === 'organization' ? 'organization' : 'person',
           organizationId: page.organizationId,
+          targetPlatforms: targetPlatforms,
           aiAnalysis: {
             angle: result.angle as PostAngle,
           },
