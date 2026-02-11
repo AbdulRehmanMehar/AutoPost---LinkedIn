@@ -3,14 +3,24 @@ import LinkedIn from 'next-auth/providers/linkedin';
 import connectToDatabase from '@/lib/mongodb';
 import User from '@/lib/models/User';
 
+// Base scopes for personal posting
+const baseScopes = 'openid profile email w_member_social';
+// Organization scopes require Marketing Developer Platform access
+// Set LINKEDIN_ORG_ENABLED=true once your app is approved
+const orgScopes = process.env.LINKEDIN_ORG_ENABLED === 'true' 
+  ? ' w_organization_social r_organization_social' 
+  : '';
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
+  secret: process.env.AUTH_SECRET,
+  trustHost: true,
   providers: [
     LinkedIn({
       clientId: process.env.LINKEDIN_CLIENT_ID!,
       clientSecret: process.env.LINKEDIN_CLIENT_SECRET!,
       authorization: {
         params: {
-          scope: 'openid profile email w_member_social',
+          scope: baseScopes + orgScopes,
         },
       },
     }),

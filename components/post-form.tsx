@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { 
   Calendar, 
@@ -10,13 +10,18 @@ import {
   Sparkles, 
   FileText, 
   Wand2,
-  RefreshCw 
+  RefreshCw,
+  Building2,
+  User,
+  RefreshCcw,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import { MediaUpload } from './media-upload';
 import { StructuredInputForm, StructuredInput } from './structured-input-form';
+import PlatformSelector from './platform-selector';
+import { PlatformType } from '@/lib/platforms/types';
 
-type PostMode = 'manual' | 'structured' | 'ai';
+type PostMode = 'manual' | 'structured' | 'ai' | 'blog_repurpose';
 
 interface MediaItem {
   id: string;
@@ -27,6 +32,31 @@ interface MediaItem {
   size: number;
 }
 
+interface LinkedInOrganization {
+  id: string;
+  name: string;
+  vanityName?: string;
+  logoUrl?: string;
+  role: string;
+}
+
+interface PageInfo {
+  _id: string;
+  name: string;
+  type: 'personal' | 'organization';
+  avatar?: string;
+  organizationId?: string;
+  connections?: Array<{
+    platform: string;
+    isActive: boolean;
+  }>;
+  contentStrategy?: {
+    persona: string;
+    tone: string;
+    targetAudience: string;
+  };
+}
+
 interface PostFormProps {
   initialContent?: string;
   initialScheduledFor?: string;
@@ -34,6 +64,10 @@ interface PostFormProps {
   initialMedia?: MediaItem[];
   initialStructuredInput?: StructuredInput;
   initialAiPrompt?: string;
+  initialPostAs?: 'person' | 'organization';
+  initialOrganizationId?: string;
+  initialPageId?: string;
+  initialTargetPlatforms?: string[];
   postId?: string;
   editMode?: boolean;
 }
@@ -54,6 +88,11 @@ const modeConfig = {
     description: 'Describe your topic, AI creates the post',
     icon: Wand2,
   },
+  blog_repurpose: {
+    label: 'Blog Repurpose',
+    description: 'Convert blog posts to LinkedIn content',
+    icon: Wand2,
+  },
 };
 
 export function PostForm({
@@ -63,6 +102,10 @@ export function PostForm({
   initialMedia = [],
   initialStructuredInput = {},
   initialAiPrompt = '',
+  initialPostAs = 'person',
+  initialOrganizationId,
+  initialPageId,
+  initialTargetPlatforms = [],
   postId,
   editMode = false,
 }: PostFormProps) {
@@ -93,10 +136,93 @@ export function PostForm({
   // Scheduling state
   const [scheduledFor, setScheduledFor] = useState(initialScheduledFor || '');
   
+  // Organization posting state
+  const [postAs, setPostAs] = useState<'person' | 'organization'>(initialPostAs);
+  const [selectedOrgId, setSelectedOrgId] = useState<string>(initialOrganizationId || '');
+  const [organizations, setOrganizations] = useState<LinkedInOrganization[]>([]);
+  const [isLoadingOrgs, setIsLoadingOrgs] = useState(false);
+  
+  // Page state
+  const [selectedPageId, setSelectedPageId] = useState<string>(initialPageId || '');
+  const [pages, setPages] = useState<PageInfo[]>([]);
+  const [isLoadingPages, setIsLoadingPages] = useState(false);
+  
+  // Platform state
+  const [targetPlatforms, setTargetPlatforms] = useState<PlatformType[]>(
+    (initialTargetPlatforms || []) as PlatformType[]
+  );
+  
   // UI state
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState('');
+
+  // Fetch organizations on mount
+  useEffect(() => {
+    fetchOrganizations();
+    fetchPages();
+  }, []);
+
+  // When page is selected, auto-fill settings from page strategy
+  useEffect(() => {
+    if (selectedPageId) {
+      const page = pages.find(p => p._id === selectedPageId);
+      if (page) {
+        // Set postAs based on page type
+        setPostAs(page.type === 'organization' ? 'organization' : 'person');
+        if (page.organizationId) {
+          setSelectedOrgId(page.organizationId);
+        }
+        // Use page strategy settings if available
+        if (page.contentStrategy) {
+          if (page.contentStrategy.targetAudience) {
+            setTargetAudience(page.contentStrategy.targetAudience);
+          }
+        }
+      }
+    }
+  }, [selectedPageId, pages]);
+
+  const fetchPages = async () => {
+    setIsLoadingPages(true);
+    try {
+      const response = await fetch('/api/pages');
+      if (response.ok) {
+        const data = await response.json();
+        setPages(data.pages || []);
+      }
+    } catch (err) {
+      console.error('Failed to fetch pages:', err);
+    } finally {
+      setIsLoadingPages(false);
+    }
+  };
+
+  const fetchOrganizations = async (refresh = false) => {
+    setIsLoadingOrgs(true);
+    try {
+      const method = refresh ? 'POST' : 'GET';
+      const response = await fetch('/api/organizations', { method });
+      if (response.ok) {
+        const data = await response.json();
+        setOrganizations(data.organizations || []);
+        
+        // Set defaults if available and not editing
+        if (!editMode && data.defaultPostAs) {
+          setPostAs(data.defaultPostAs);
+          if (data.defaultOrganizationId) {
+            setSelectedOrgId(data.defaultOrganizationId);
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Failed to fetch organizations:', err);
+    } finally {
+      setIsLoadingOrgs(false);
+    }
+  };
+
+  const selectedOrg = organizations.find(org => org.id === selectedOrgId);
 
   const characterCount = content.length;
   const maxCharacters = 3000;
@@ -176,6 +302,11 @@ export function PostForm({
         structuredInput: mode === 'structured' ? structuredInput : undefined,
         aiPrompt: mode === 'ai' ? aiPrompt : undefined,
         media,
+        postAs,
+        organizationId: postAs === 'organization' ? selectedOrgId : undefined,
+        organizationName: postAs === 'organization' ? selectedOrg?.name : undefined,
+        pageId: selectedPageId || undefined,
+        targetPlatforms: targetPlatforms.length > 0 ? targetPlatforms : undefined,
       };
 
       if (action === 'publish') {
@@ -206,8 +337,215 @@ export function PostForm({
 
   const minDateTime = format(new Date(), "yyyy-MM-dd'T'HH:mm");
 
+  const selectedPage = pages.find(p => p._id === selectedPageId);
+
   return (
     <div className="space-y-6">
+      {/* Page Selector (if pages exist) */}
+      {pages.length > 0 && (
+        <div>
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
+            Select Page (Optional)
+          </label>
+          <div className="flex flex-wrap gap-3">
+            <button
+              type="button"
+              onClick={() => setSelectedPageId('')}
+              className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition-all ${
+                !selectedPageId
+                  ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950'
+                  : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600'
+              }`}
+            >
+              <div className={`rounded-full p-2 ${!selectedPageId ? 'bg-blue-100 dark:bg-blue-900' : 'bg-zinc-100 dark:bg-zinc-800'}`}>
+                <User className={`h-5 w-5 ${!selectedPageId ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500'}`} />
+              </div>
+              <div>
+                <span className={`font-medium ${!selectedPageId ? 'text-blue-700 dark:text-blue-300' : 'text-zinc-700 dark:text-zinc-300'}`}>
+                  No Page
+                </span>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">Standalone post</p>
+              </div>
+            </button>
+
+            {pages.map((page) => (
+              <button
+                key={page._id}
+                type="button"
+                onClick={() => setSelectedPageId(page._id)}
+                className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition-all ${
+                  selectedPageId === page._id
+                    ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950'
+                    : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600'
+                }`}
+              >
+                <div className={`rounded-full p-2 ${
+                  selectedPageId === page._id 
+                    ? 'bg-blue-100 dark:bg-blue-900' 
+                    : 'bg-zinc-100 dark:bg-zinc-800'
+                }`}>
+                  {page.avatar ? (
+                    <img src={page.avatar} alt={page.name} className="h-5 w-5 rounded-full object-cover" />
+                  ) : page.type === 'organization' ? (
+                    <Building2 className={`h-5 w-5 ${
+                      selectedPageId === page._id 
+                        ? 'text-blue-600 dark:text-blue-400' 
+                        : 'text-zinc-500'
+                    }`} />
+                  ) : (
+                    <User className={`h-5 w-5 ${
+                      selectedPageId === page._id 
+                        ? 'text-blue-600 dark:text-blue-400' 
+                        : 'text-zinc-500'
+                    }`} />
+                  )}
+                </div>
+                <div>
+                  <span className={`font-medium ${
+                    selectedPageId === page._id 
+                      ? 'text-blue-700 dark:text-blue-300' 
+                      : 'text-zinc-700 dark:text-zinc-300'
+                  }`}>
+                    {page.name}
+                  </span>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 capitalize">{page.type}</p>
+                </div>
+              </button>
+            ))}
+          </div>
+          {selectedPage?.contentStrategy && (
+            <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+              Strategy: {selectedPage.contentStrategy.persona.substring(0, 50)}...
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Post As Selector */}
+      <div>
+        <div className="flex items-center justify-between mb-3">
+          <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">
+            Post as
+          </label>
+          {organizations.length > 0 && (
+            <button
+              type="button"
+              onClick={() => fetchOrganizations(true)}
+              disabled={isLoadingOrgs}
+              className="flex items-center gap-1 text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400"
+            >
+              <RefreshCcw className={`h-3 w-3 ${isLoadingOrgs ? 'animate-spin' : ''}`} />
+              Refresh orgs
+            </button>
+          )}
+        </div>
+        <div className="flex flex-wrap gap-3">
+          {/* Personal Profile Option */}
+          <button
+            type="button"
+            onClick={() => {
+              setPostAs('person');
+              setSelectedOrgId('');
+            }}
+            className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition-all ${
+              postAs === 'person'
+                ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950'
+                : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600'
+            }`}
+          >
+            <div className={`rounded-full p-2 ${postAs === 'person' ? 'bg-blue-100 dark:bg-blue-900' : 'bg-zinc-100 dark:bg-zinc-800'}`}>
+              <User className={`h-5 w-5 ${postAs === 'person' ? 'text-blue-600 dark:text-blue-400' : 'text-zinc-500'}`} />
+            </div>
+            <div>
+              <span className={`font-medium ${postAs === 'person' ? 'text-blue-700 dark:text-blue-300' : 'text-zinc-700 dark:text-zinc-300'}`}>
+                Personal Profile
+              </span>
+              <p className="text-xs text-zinc-500 dark:text-zinc-400">Post as yourself</p>
+            </div>
+          </button>
+
+          {/* Organization Options */}
+          {isLoadingOrgs ? (
+            <div className="flex items-center gap-2 px-4 py-3 text-zinc-500">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Loading organizations...</span>
+            </div>
+          ) : organizations.length > 0 ? (
+            organizations.map((org) => (
+              <button
+                key={org.id}
+                type="button"
+                onClick={() => {
+                  setPostAs('organization');
+                  setSelectedOrgId(org.id);
+                }}
+                className={`flex items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition-all ${
+                  postAs === 'organization' && selectedOrgId === org.id
+                    ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-950'
+                    : 'border-zinc-200 hover:border-zinc-300 dark:border-zinc-700 dark:hover:border-zinc-600'
+                }`}
+              >
+                <div className={`rounded-full p-2 ${
+                  postAs === 'organization' && selectedOrgId === org.id 
+                    ? 'bg-blue-100 dark:bg-blue-900' 
+                    : 'bg-zinc-100 dark:bg-zinc-800'
+                }`}>
+                  {org.logoUrl ? (
+                    <img src={org.logoUrl} alt={org.name} className="h-5 w-5 rounded-full object-cover" />
+                  ) : (
+                    <Building2 className={`h-5 w-5 ${
+                      postAs === 'organization' && selectedOrgId === org.id 
+                        ? 'text-blue-600 dark:text-blue-400' 
+                        : 'text-zinc-500'
+                    }`} />
+                  )}
+                </div>
+                <div>
+                  <span className={`font-medium ${
+                    postAs === 'organization' && selectedOrgId === org.id 
+                      ? 'text-blue-700 dark:text-blue-300' 
+                      : 'text-zinc-700 dark:text-zinc-300'
+                  }`}>
+                    {org.name}
+                  </span>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400">Organization • {org.role}</p>
+                </div>
+              </button>
+            ))
+          ) : (
+            <button
+              type="button"
+              onClick={() => fetchOrganizations(true)}
+              className="flex items-center gap-2 rounded-xl border-2 border-dashed border-zinc-300 px-4 py-3 text-zinc-500 hover:border-zinc-400 hover:text-zinc-600 dark:border-zinc-700 dark:hover:border-zinc-600"
+            >
+              <Building2 className="h-5 w-5" />
+              <span className="text-sm">Load organization pages</span>
+            </button>
+          )}
+        </div>
+        
+        {postAs === 'organization' && selectedOrgId && (
+          <p className="mt-2 text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+            <span>✓</span> Organization posts include impression and click analytics
+          </p>
+        )}
+      </div>
+
+      {/* Platform Selector */}
+      <div>
+        <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">
+          Target Platforms
+        </label>
+        <PlatformSelector
+          availablePlatforms={selectedPage?.connections 
+            ? selectedPage.connections.filter(c => c.isActive).map(c => c.platform as PlatformType)
+            : ['linkedin', 'facebook', 'twitter', 'instagram']
+          }
+          selectedPlatforms={targetPlatforms}
+          onChange={setTargetPlatforms}
+        />
+      </div>
+
       {/* Mode Selector */}
       <div>
         <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-3">

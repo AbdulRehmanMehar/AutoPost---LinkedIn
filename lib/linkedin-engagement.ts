@@ -1,5 +1,6 @@
 import connectToDatabase from '@/lib/mongodb';
 import User from '@/lib/models/User';
+import { CircuitBreaker, fetchWithTimeout } from '@/lib/circuit-breaker';
 
 // ============================================
 // Types
@@ -250,12 +251,25 @@ export async function getPostComments(
   postUrn: string
 ): Promise<{ success: boolean; comments?: LinkedInComment[]; error?: string }> {
   try {
+    // Circuit breaker: stop hammering LinkedIn API if it's returning 403s
+    const breaker = CircuitBreaker.for('linkedin:socialActions:comments', {
+      failureThreshold: 3,
+      resetTimeoutMs: 60 * 60 * 1000, // 1 hour backoff on repeated failures
+      instantTripCodes: [403],
+    });
+
+    if (!breaker.allowRequest()) {
+      const reason = breaker.getRejectionReason();
+      console.log(`[LinkedIn] Skipping comments fetch: ${reason}`);
+      return { success: false, error: reason };
+    }
+
     const { accessToken } = await getLinkedInCredentials(userId);
 
     // URL encode the URN for the API call
     const encodedUrn = encodeURIComponent(postUrn);
 
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://api.linkedin.com/v2/socialActions/${encodedUrn}/comments?count=100`,
       {
         method: 'GET',
@@ -263,15 +277,18 @@ export async function getPostComments(
           Authorization: `Bearer ${accessToken}`,
           'X-Restli-Protocol-Version': '2.0.0',
         },
+        timeoutMs: 15_000,
       }
     );
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('LinkedIn comments API error:', errorText);
+      console.error('LinkedIn comments API error:', response.status, errorText);
+      breaker.recordFailure(response.status);
       return { success: false, error: `Failed to fetch comments: ${response.status}` };
     }
 
+    breaker.recordSuccess();
     const data = await response.json();
     
     const comments: LinkedInComment[] = (data.elements || []).map((comment: {
@@ -444,11 +461,24 @@ export async function getPostReactions(
   postUrn: string
 ): Promise<{ success: boolean; reactions?: LinkedInReaction[]; error?: string }> {
   try {
+    // Circuit breaker: same socialActions API family
+    const breaker = CircuitBreaker.for('linkedin:socialActions:reactions', {
+      failureThreshold: 3,
+      resetTimeoutMs: 60 * 60 * 1000,
+      instantTripCodes: [403],
+    });
+
+    if (!breaker.allowRequest()) {
+      const reason = breaker.getRejectionReason();
+      console.log(`[LinkedIn] Skipping reactions fetch: ${reason}`);
+      return { success: false, error: reason };
+    }
+
     const { accessToken } = await getLinkedInCredentials(userId);
 
     const encodedUrn = encodeURIComponent(postUrn);
 
-    const response = await fetch(
+    const response = await fetchWithTimeout(
       `https://api.linkedin.com/v2/socialActions/${encodedUrn}/likes?count=100`,
       {
         method: 'GET',
@@ -456,14 +486,18 @@ export async function getPostReactions(
           Authorization: `Bearer ${accessToken}`,
           'X-Restli-Protocol-Version': '2.0.0',
         },
+        timeoutMs: 15_000,
       }
     );
 
     if (!response.ok) {
       const errorText = await response.text();
-      console.error('LinkedIn reactions API error:', errorText);
+      console.error('LinkedIn reactions API error:', response.status, errorText);
+      breaker.recordFailure(response.status);
       return { success: false, error: `Failed to fetch reactions: ${response.status}` };
     }
+
+    breaker.recordSuccess();
 
     const data = await response.json();
 

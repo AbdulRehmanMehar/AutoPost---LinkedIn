@@ -166,7 +166,7 @@ const CommentReplySchema = new Schema<ICommentReply>(
 // Index for efficient querying
 CommentReplySchema.index({ userId: 1, status: 1 });
 CommentReplySchema.index({ postId: 1 });
-CommentReplySchema.index({ commentUrn: 1 }, { unique: true });
+// Note: commentUrn already has unique:true in schema which creates an index
 
 export const CommentReply: Model<ICommentReply> =
   mongoose.models.CommentReply ||

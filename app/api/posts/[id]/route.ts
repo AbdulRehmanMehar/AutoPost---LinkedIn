@@ -75,7 +75,13 @@ export async function PUT(
 
     // If publishing now
     if (publishNow) {
-      const result = await postToLinkedIn(session.user.email, content || post.content);
+      const result = await postToLinkedIn(
+        session.user.email, 
+        content || post.content,
+        post.media || [],
+        post.postAs || 'person',
+        post.organizationId
+      );
       
       post.content = content || post.content;
       post.status = result.success ? 'published' : 'failed';
@@ -89,13 +95,30 @@ export async function PUT(
     }
 
     // Update content and/or schedule
-    if (content) post.content = content;
+    if (content !== undefined) post.content = content;
+    if ('mode' in body) post.mode = body.mode;
+    if ('structuredInput' in body) post.structuredInput = body.structuredInput;
+    if ('aiPrompt' in body) post.aiPrompt = body.aiPrompt;
+    if ('generatedContent' in body) post.generatedContent = body.generatedContent;
+    if ('media' in body) post.media = body.media;
+    if ('postAs' in body) post.postAs = body.postAs;
+    if ('organizationId' in body) post.organizationId = body.organizationId;
+    if ('organizationName' in body) post.organizationName = body.organizationName;
+    if ('pageId' in body) post.pageId = body.pageId;
+    if ('targetPlatforms' in body) post.targetPlatforms = body.targetPlatforms;
+    
     if (scheduledFor) {
       post.scheduledFor = new Date(scheduledFor);
-      post.status = 'scheduled';
+      // Only change status to scheduled if it's currently draft
+      if (post.status === 'draft') {
+        post.status = 'scheduled';
+      }
     } else if (scheduledFor === null) {
       post.scheduledFor = undefined;
-      post.status = 'draft';
+      // Only change to draft if it's currently scheduled
+      if (post.status === 'scheduled') {
+        post.status = 'draft';
+      }
     }
 
     await post.save();

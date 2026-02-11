@@ -3,50 +3,83 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: linkedin-auto-poster
+    container_name: autopost
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       - MONGODB_URI=${MONGODB_URI}
       - AUTH_SECRET=${AUTH_SECRET}
+      - AUTH_TRUST_HOST=${AUTH_TRUST_HOST}
+      - AUTH_URL=${AUTH_URL}
       - LINKEDIN_CLIENT_ID=${LINKEDIN_CLIENT_ID}
       - LINKEDIN_CLIENT_SECRET=${LINKEDIN_CLIENT_SECRET}
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - O_API_KEY=${O_API_KEY}
+      - OPENAI_API_KEY=${O_API_KEY}
       - CRON_SECRET=${CRON_SECRET}
       - NEXTAUTH_URL=${NEXTAUTH_URL}
       - S3_ENDPOINT=${S3_ENDPOINT}
       - S3_ACCESS_KEY=${S3_ACCESS_KEY}
       - S3_SECRET_KEY=${S3_SECRET_KEY}
       - S3_BUCKET=${S3_BUCKET}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - AI_PROVIDER=${AI_PROVIDER:-ollama}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
+      - OLLAMA_MODEL=${OLLAMA_MODEL:-qwen2.5:7b}
+      - FACEBOOK_APP_ID=${FACEBOOK_APP_ID}
+      - FACEBOOK_APP_SECRET=${FACEBOOK_APP_SECRET}
+      - FACEBOOK_REDIRECT_URI=${FACEBOOK_REDIRECT_URI}
+      - TWITTER_CLIENT_ID=${TWITTER_CLIENT_ID}
+      - TWITTER_CLIENT_SECRET=${TWITTER_CLIENT_SECRET}
+      - TWITTER_REDIRECT_URI=${TWITTER_REDIRECT_URI}
+      - RESEND_API_KEY=${RESEND_API_KEY}
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 40s
+    logging:
+      driver: gelf
+      options:
+        gelf-address: ${GELF_ADDRESS}
+        tag: "{{.Name}}"
     networks:
       - app-network
+      - elk
 
-  # Cron scheduler - calls the publish endpoint every 5 minutes
+  # Cron scheduler - calls the publish and engagement endpoints
   scheduler:
-    image: alpine:latest
-    container_name: linkedin-scheduler
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile
+    container_name: autopost-scheduler
     restart: unless-stopped
     depends_on:
-      app:
-        condition: service_healthy
+      - app
     environment:
       - CRON_SECRET=${CRON_SECRET}
       - APP_URL=http://app:3000
-    command: >
-      sh -c "
-        apk add --no-cache curl &&
-        echo '*/5 * * * * curl -s -H \"Authorization: Bearer '\"$$CRON_SECRET\"'\" '\"$$APP_URL\"'/api/cron/publish >> /var/log/cron.log 2>&1' > /etc/crontabs/root &&
-        crond -f -l 2
-      "
+    command: ["sh", "/scheduler/entrypoint.sh"]
+    logging:
+      driver: gelf
+      options:
+        gelf-address: ${GELF_ADDRESS}
+        tag: "{{.Name}}"
     networks:
       - app-network
+      - elk
 
 networks:
   app-network:
     driver: bridge
+  elk:
+    external: true
