@@ -47,11 +47,7 @@ services:
       timeout: 5s
       retries: 10
       start_period: 40s
-    logging:
-      driver: gelf
-      options:
-        gelf-address: ${GELF_ADDRESS}
-        tag: "{{.Name}}"
+  
     networks:
       - app-network
       - elk
