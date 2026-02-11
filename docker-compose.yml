@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: autopost
+    container_name: autopostv2
     restart: unless-stopped
     ports:
       - "${PORT:-3000}:3000"
@@ -61,7 +61,7 @@ services:
     build:
       context: ./scheduler
       dockerfile: Dockerfile
-    container_name: autopost-scheduler
+    container_name: autopostv2-scheduler
     restart: unless-stopped
     depends_on:
       - app
@@ -69,11 +69,6 @@ services:
       - CRON_SECRET=${CRON_SECRET}
       - APP_URL=http://app:3000
     command: ["sh", "/scheduler/entrypoint.sh"]
-    logging:
-      driver: gelf
-      options:
-        gelf-address: ${GELF_ADDRESS}
-        tag: "{{.Name}}"
     networks:
       - app-network
       - elk
