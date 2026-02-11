@@ -41,13 +41,15 @@ fi
 if ! grep -q "/scheduler/cron-call.sh icp-engage" "$CRONTAB" 2>/dev/null; then
   echo "0 */12 * * * sh /scheduler/cron-call.sh icp-engage >> /var/log/cron-icp-engage.log 2>&1" >> "$CRONTAB"
 fi
-# Token Refresh - Check and refresh expiring tokens every hour
+# Token Refresh - Check and refresh expiring tokens 10 minutes BEFORE other hourly crons
+# Runs at :50 to ensure fresh tokens are in DB before ICP/conversation/metrics crons fire at :00
 if ! grep -q "/scheduler/cron-call.sh token-refresh" "$CRONTAB" 2>/dev/null; then
-  echo "0 * * * * sh /scheduler/cron-call.sh token-refresh >> /var/log/cron-token-refresh.log 2>&1" >> "$CRONTAB"
+  echo "50 * * * * sh /scheduler/cron-call.sh token-refresh >> /var/log/cron-token-refresh.log 2>&1" >> "$CRONTAB"
 fi
 # Conversation Monitor - Monitor and respond to Twitter conversation replies every 6 hours
+# Offset by 5 minutes to avoid colliding with ICP engage cron at :00
 if ! grep -q "/scheduler/cron-call.sh conversation-monitor" "$CRONTAB" 2>/dev/null; then
-  echo "0 */6 * * * sh /scheduler/cron-call.sh conversation-monitor >> /var/log/cron-conversation-monitor.log 2>&1" >> "$CRONTAB"
+  echo "5 */6 * * * sh /scheduler/cron-call.sh conversation-monitor >> /var/log/cron-conversation-monitor.log 2>&1" >> "$CRONTAB"
 fi
 
 echo "Cron jobs installed:"

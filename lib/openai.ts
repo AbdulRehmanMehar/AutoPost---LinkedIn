@@ -1,16 +1,8 @@
-import OpenAI from 'openai';
 import { StructuredInput } from './models/Post';
 import { getPerformanceInsightsForAI } from './learning/platform-learning';
 import { createChatCompletion } from './ai-client';
 
-// Use Groq's OpenAI-compatible API (kept for compatibility, but prefer createChatCompletion)
-const openai = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: 'https://api.groq.com/openai/v1',
-});
-
-// Groq model - NOTE: The ai-client handles model rotation automatically
-const AI_MODEL = 'llama-3.3-70b-versatile';
+// NOTE: The ai-client handles model selection automatically (Ollama or Groq)
 
 // Dynamic system prompt based on page type
 function getLinkedInSystemPrompt(pageType: PageVoiceType = 'personal'): string {
@@ -20,6 +12,8 @@ function getLinkedInSystemPrompt(pageType: PageVoiceType = 'personal'): string {
   const us = isOrganization ? 'our team' : 'me';
   
   return `You write LinkedIn posts that sound HUMAN, not AI. Your writing is conversational, direct, and authentic.
+
+CRITICAL: Return ONLY the post content itself. No explanations, no "Here's a post:", no meta-commentary. Do NOT use <think> tags or reasoning blocks. Just write the post directly.
 
 HOW REAL PEOPLE WRITE VS AI:
 
@@ -626,6 +620,8 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
 
 const ENGAGEMENT_SYSTEM_PROMPT = `You write authentic, engaging LinkedIn comments and replies. You sound like a thoughtful professional who genuinely engages with content.
 
+CRITICAL: Return ONLY the comment/reply text. No explanations, no "Here's a comment:", no quotes around it, no options. Just the raw text. Do NOT use <think> tags.
+
 Be authentic and specific. Reference specific points from the post or comment you're responding to. Add genuine value or perspective. Never use generic phrases like "Great post!" or "Love this!" Sound like a real person not a bot.
 
 Keep it concise. Comments should be 50 to 150 characters ideal, max 280. Replies should be 30 to 100 characters ideal, max 200. One clear thought per comment.
@@ -816,6 +812,8 @@ export type { PostAngle, RiskLevel };
 
 const ANALYSIS_SYSTEM_PROMPT = `You are an expert at analyzing LinkedIn content for engagement potential and risk assessment. You provide structured analysis in JSON format.
 
+IMPORTANT: You MUST output ONLY valid JSON. No explanations, no markdown, no code blocks, no text before or after the JSON. Do NOT wrap in \`\`\`json blocks. Do NOT use <think> tags. Just the raw JSON object.
+
 Risk Levels:
 - LOW: Proven themes, educational content, no controversy, safe insights
 - MEDIUM: Opinion-based, links to external pages, personal stories
@@ -919,6 +917,8 @@ export function requiresApproval(analysis: AIAnalysis, includesLink: boolean): b
 // ============================================
 
 const BLOG_ANALYZER_PROMPT = `You are an expert at extracting LinkedIn post angles from blog content. You identify key insights that can be repurposed into multiple engaging posts.
+
+IMPORTANT: You MUST output ONLY valid JSON. No explanations, no markdown, no code blocks, no text before or after the JSON. Do NOT wrap in \`\`\`json blocks. Do NOT use <think> tags. Just the raw JSON object.
 
 Your job is to:
 1. Identify the core insights and takeaways
@@ -1109,6 +1109,7 @@ const PLATFORM_SYSTEM_PROMPTS: Record<PlatformType, string> = {
 4. NO "What do you think?" or "Share your thoughts" - be specific
 5. Return ONLY the post content itself
 6. NEVER FABRICATE: No invented clients, fake metrics, made-up scenarios with dates, or fictional dollar amounts. Teach principles, not fake stories.
+7. Do NOT use <think> tags or reasoning blocks. Just write the post.
 
 CHARACTER LIMIT: 300-500 characters ideal. Max 1000.
 
@@ -1158,6 +1159,7 @@ Be real: Share what actually happened.`,
 4. MUST include 1-2 hashtags at the end
 5. Return ONLY the tweet content itself
 6. NEVER FABRICATE: No invented clients, fake metrics, or made-up scenarios. Share real lessons only.
+7. Do NOT use <think> tags or reasoning blocks. Just write the tweet.
 
 CHARACTER COUNT: Aim for 220-260 characters total. NEVER exceed 280.
 
@@ -1205,6 +1207,8 @@ They COUNT toward your 280 character limit.
 NO emojis (or max 1). NO formatting. Plain text only.`,
 
   instagram: `You write Instagram captions that feel authentic and personal. Front-load value in first 125 characters (before "more").
+
+CRITICAL: Return ONLY the caption. No explanations, no meta-commentary. Do NOT use <think> tags or reasoning blocks.
 
 INSTAGRAM HUMAN WRITING
 

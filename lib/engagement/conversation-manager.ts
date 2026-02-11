@@ -194,19 +194,14 @@ function doesResponseAddressMessage(response: string, theirMessage: string): boo
  */
 async function scoreResponseQuality(response: string, theirMessage: string): Promise<number> {
   try {
-    const prompt = `Rate this Twitter reply quality (0-1 scale):
+    const prompt = `Rate this Twitter reply quality from 0 to 1.
 
 Their message: "${theirMessage}"
 Our response: "${response}"
 
-Score criteria:
-- 1.0: Highly relevant, adds value, natural conversation
-- 0.7: Good response, on-topic, helpful
-- 0.5: Acceptable but generic
-- 0.3: Weak, off-topic, or robotic
-- 0.0: Spam, inappropriate, or nonsensical
+Score: 1.0=highly relevant and valuable, 0.7=good and on-topic, 0.5=acceptable, 0.3=weak, 0.0=spam.
 
-Return ONLY a decimal number between 0 and 1 (e.g., "0.8"). Nothing else.`;
+Return ONLY a single decimal number between 0 and 1 (example: 0.8). No text, no explanation. Do NOT use <think> tags.`;
 
     const result = await createChatCompletion({
       messages: [{ role: 'user', content: prompt }],
@@ -359,28 +354,27 @@ function incrementDailyUsage(sent: boolean = true) {
 // Conversation Quality Analyzer
 // ============================================
 
-const CONVERSATION_ANALYZER_PROMPT = `You are an expert at analyzing conversation context to determine if an AI should continue engaging on Twitter/LinkedIn.
+const CONVERSATION_ANALYZER_PROMPT = `You analyze conversation context to decide if we should keep engaging on Twitter/LinkedIn.
 
-IMPORTANT: We want to BUILD RELATIONSHIPS through valuable conversations. Be BIASED TOWARD RESPONDING unless there's a clear reason not to.
+IMPORTANT: Output ONLY valid JSON. No explanations, no markdown code blocks, no text before or after. Do NOT use <think> tags.
 
-RESPOND (default - be generous here):
-- They shared ANY perspective or opinion (even short ones)
-- They answered our question (continue the dialogue!)
-- They mentioned something we can ask a follow-up question about
-- They seem to have expertise or experience to share
-- The conversation has momentum (back-and-forth exchanges)
-- Their response shows thought, even if brief
+We want to BUILD RELATIONSHIPS. Be BIASED TOWARD RESPONDING unless there's a clear reason not to.
 
-DO NOT RESPOND (be strict here - only skip if clearly one of these):
-- Single-word replies: "Thanks", "Ok", "Nice", "Cool", "Agreed"
-- Explicit conversation enders: "Bye", "Talk later", "Got to go"
+RESPOND (default):
+- They shared a perspective or opinion
+- They answered our question
+- They mentioned something we can ask about
+- They have expertise to share
+- The conversation has momentum
+
+DO NOT RESPOND:
+- Single-word replies: "Thanks", "Ok", "Nice", "Cool"
+- Conversation enders: "Bye", "Talk later"
 - Hostile or dismissive tone
-- We've already sent 3+ responses in this thread (spam risk)
-- Their message is completely unrelated to the topic
+- We already sent 3+ responses (spam risk)
 
-CRITICAL: If their reply ADDS ANY VALUE OR INFORMATION to the conversation, we should respond. A reply like "It depends on X" or "In my experience Y" is an INVITATION to continue, not an ending.
-
-Return JSON only: { "shouldRespond": true/false, "reason": "brief explanation", "suggestedTone": "thoughtful|supportive|educational|friendly" }`;
+Output format (JSON only, nothing else):
+{"shouldRespond": true, "reason": "brief explanation", "suggestedTone": "thoughtful"}`;
 
 async function analyzeConversationContext(
   conversationHistory: Array<{ content: string; isFromUs: boolean; timestamp: Date }>,
@@ -466,29 +460,23 @@ async function generateConversationResponse(
     .map(msg => `${msg.isFromUs ? '[US]' : '[THEM]'}: ${msg.content}`)
     .join('\n');
 
-  const prompt = `Generate a thoughtful follow-up reply for this ${platform} conversation.
+  const prompt = `Generate a follow-up reply for this ${platform} conversation.
 
-ORIGINAL POST THEY SHARED:
-"${originalPost.content}"
+ORIGINAL POST: "${originalPost.content}"
 
-RECENT CONVERSATION:
+CONVERSATION:
 ${conversationText}
 
 Tone: ${suggestedTone}
-Platform: ${platform}
 Max length: ${maxLength} characters
 
-Guidelines:
-- Be natural and conversational, not robotic
-- Add genuine value or insight
+Rules:
+- Return ONLY the reply text. No explanations, no quotes around it. Do NOT use <think> tags.
+- Be natural and conversational
 - Reference something specific from their latest message
-- Keep it concise and engaging
-- Sound like a real person, not a brand or bot
-- Avoid generic responses like "Great point!" or "Thanks for sharing!"
-- If they asked a question, answer it thoughtfully
-- If they shared an insight, build on it or share a related perspective
-
-Return ONLY the reply text, nothing else.`;
+- Sound like a real person, not a bot
+- Avoid "Great point!" or "Thanks for sharing!"
+- If they asked a question, answer it`;
 
   console.log(`[Conversation Monitor] Generating response for ${platform} conversation...`);
   console.log(`[Conversation Monitor] Prompt length: ${prompt.length} chars`);
@@ -498,7 +486,7 @@ Return ONLY the reply text, nothing else.`;
   for (let attempt = 1; attempt <= 3; attempt++) {
     const result = await createChatCompletion({
       messages: [
-        { role: 'system', content: 'You write authentic, engaging social media replies that sound human and add value to conversations.' },
+        { role: 'system', content: 'You write authentic social media replies. Return ONLY the reply text. No explanations, no meta-commentary. Do NOT use <think> tags.' },
         { role: 'user', content: prompt },
       ],
       temperature: 0.8,
@@ -790,11 +778,14 @@ export async function monitorAndRespondToConversations(
         }
 
         // Get Twitter connection for this page
+        // IMPORTANT: Reload fresh from DB to avoid stale token race with token-refresh cron
         const page = engagement.pageId as any;
-        const twitterConnection = page.connections?.find((c: any) => c.platform === 'twitter' && c.isActive);
+        const pageId = page._id?.toString() || page.toString();
+        const freshPage = await Page.findById(pageId);
+        const twitterConnection = freshPage?.connections?.find((c: any) => c.platform === 'twitter' && c.isActive);
         
         if (!twitterConnection) {
-          result.errors.push(`Page ${page._id?.toString() || 'unknown'} has no active Twitter connection`);
+          result.errors.push(`Page ${pageId} has no active Twitter connection`);
           continue;
         }
 
@@ -816,12 +807,79 @@ export async function monitorAndRespondToConversations(
         );
 
         if (!conversationResult.success) {
-          result.errors.push(`Failed to check conversation ${engagement._id}: ${conversationResult.error}`);
+          const errorMsg = conversationResult.error || 'Unknown error';
+          result.errors.push(`Failed to check conversation ${engagement._id}: ${errorMsg}`);
+          
+          // PRODUCTION FIX: If the error is auth-related (401, "Could not get user info",
+          // "Unauthorized"), disable auto-response to stop retrying a broken connection.
+          const isAuthError = errorMsg.includes('401') ||
+            errorMsg.includes('Unauthorized') ||
+            errorMsg.includes('Could not get user info') ||
+            errorMsg.includes('Could not get user ID') ||
+            errorMsg.includes('invalid or expired');
+          
+          if (isAuthError) {
+            console.warn(`[Conversation Monitor] Auth error for engagement ${engagement._id} — disabling auto-response`);
+            await ICPEngagement.updateOne(
+              { _id: engagement._id },
+              {
+                $set: {
+                  'conversation.autoResponseEnabled': false,
+                  'conversation.lastCheckedAt': new Date(),
+                  'conversation.disabledReason': `Auth error: ${errorMsg}`,
+                },
+              }
+            );
+          } else {
+            // For non-auth errors, increment a failure counter
+            // Disable after 5 consecutive failures to prevent infinite retries
+            const consecutiveFailures = ((engagement as any).conversation?.consecutiveFailures || 0) + 1;
+            if (consecutiveFailures >= 5) {
+              console.warn(`[Conversation Monitor] 5 consecutive failures for ${engagement._id} — disabling auto-response`);
+              await ICPEngagement.updateOne(
+                { _id: engagement._id },
+                {
+                  $set: {
+                    'conversation.autoResponseEnabled': false,
+                    'conversation.lastCheckedAt': new Date(),
+                    'conversation.consecutiveFailures': consecutiveFailures,
+                    'conversation.disabledReason': `Too many failures: ${errorMsg}`,
+                  },
+                }
+              );
+            } else {
+              await ICPEngagement.updateOne(
+                { _id: engagement._id },
+                {
+                  $set: {
+                    'conversation.lastCheckedAt': new Date(),
+                    'conversation.consecutiveFailures': consecutiveFailures,
+                  },
+                }
+              );
+            }
+          }
+          
           continue;
+        }
+
+        // Reset consecutive failure counter on success
+        if ((engagement as any).conversation?.consecutiveFailures > 0) {
+          await ICPEngagement.updateOne(
+            { _id: engagement._id },
+            { $set: { 'conversation.consecutiveFailures': 0 } }
+          );
         }
 
         // Get our user ID to filter out our own tweets
         const ourUserId = await twitterAdapter.getOwnUserId(twitterConnection);
+        
+        if (!ourUserId) {
+          result.errors.push(`Could not get own user ID for engagement ${engagement._id} — Twitter API may be failing`);
+          // Don't disable here since checkConversationReplies already succeeded
+          // Just skip this iteration
+          continue;
+        }
         
         // Get existing message IDs to avoid duplicates
         const existingMessageIds = new Set(

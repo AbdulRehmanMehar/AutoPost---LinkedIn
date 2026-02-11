@@ -22,6 +22,16 @@ export interface ModelLimits {
 
 export const GROQ_MODEL_LIMITS: Record<string, ModelLimits> = {
   // ============================================
+  // Ollama local models (no rate limits - unlimited)
+  // ============================================
+  'qwen2.5:7b': {
+    requestsPerMinute: 999,
+    requestsPerDay: 999999,
+    tokensPerMinute: 999999,
+    tokensPerDay: null,  // No limit for local models
+  },
+
+  // ============================================
   // Compound models (NO daily token limit - use as fallback)
   // ============================================
   'groq/compound': {

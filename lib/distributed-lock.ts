@@ -6,6 +6,9 @@
  */
 
 import mongoose from 'mongoose';
+import { logger } from './logger';
+
+const log = logger.child('distributed-lock');
 
 // Lock document schema
 interface ICronLock {
@@ -30,8 +33,8 @@ const CronLockSchema = new mongoose.Schema<ICronLock>(
 // Create model if it doesn't exist
 const CronLock = mongoose.models.CronLock || mongoose.model<ICronLock>('CronLock', CronLockSchema);
 
-// Generate unique instance ID
-const INSTANCE_ID = `${process.env.HOSTNAME || 'local'}-${process.pid}-${Date.now()}`;
+// Generate unique instance ID - stable per process (no Date.now() to avoid drift)
+const INSTANCE_ID = `${process.env.HOSTNAME || 'local'}-${process.pid}`;
 
 export interface LockOptions {
   lockName: string;
@@ -58,19 +61,17 @@ export async function acquireLock(options: LockOptions): Promise<LockResult> {
     retryIntervalMs = 1000,
   } = options;
 
-  const lockId = `cron:${lockName}`;
+  const lockId = lockName.startsWith('cron:') ? lockName : `cron:${lockName}`;
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
 
   const tryAcquire = async (): Promise<LockResult> => {
     try {
-      // Try to insert a new lock or update an expired one
+      // Strategy 1: Try to take over an expired lock via atomic findOneAndUpdate
       const result = await CronLock.findOneAndUpdate(
         {
           _id: lockId,
-          $or: [
-            { expiresAt: { $lt: now } }, // Lock expired
-          ],
+          expiresAt: { $lt: now }, // Only match if expired
         },
         {
           _id: lockId,
@@ -86,34 +87,38 @@ export async function acquireLock(options: LockOptions): Promise<LockResult> {
       );
 
       if (result) {
-        console.log(`Lock acquired: ${lockId} by ${INSTANCE_ID}`);
+        log.info(`Lock acquired (took over expired): ${lockId}`, { lockId, holder: INSTANCE_ID });
         return { acquired: true, lockId, holder: INSTANCE_ID };
       }
 
-      // Lock exists and isn't expired - try upsert for new locks
+      // Strategy 2: Try to create a brand-new lock (no lock exists at all)
       try {
         await CronLock.create({
           _id: lockId,
           holder: INSTANCE_ID,
           acquiredAt: now,
           expiresAt,
+          metadata: { 
+            attemptedAt: now,
+            environment: process.env.NODE_ENV,
+          },
         });
-        console.log(`Lock created: ${lockId} by ${INSTANCE_ID}`);
+        log.info(`Lock created: ${lockId}`, { lockId, holder: INSTANCE_ID });
         return { acquired: true, lockId, holder: INSTANCE_ID };
       } catch (createError: unknown) {
-        // Duplicate key error means another process got the lock
+        // Duplicate key error (11000) means another process got the lock
         if ((createError as { code?: number }).code === 11000) {
           const existingLock = await CronLock.findById(lockId);
           return { 
             acquired: false, 
             holder: existingLock?.holder,
-            error: `Lock held by ${existingLock?.holder}`,
+            error: `Lock held by ${existingLock?.holder} (expires: ${existingLock?.expiresAt?.toISOString()})`,
           };
         }
         throw createError;
       }
     } catch (error) {
-      console.error('Error acquiring lock:', error);
+      log.error('Error acquiring lock', { lockId, error: error instanceof Error ? error.message : 'Unknown' });
       return { 
         acquired: false, 
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -148,23 +153,34 @@ export async function acquireLock(options: LockOptions): Promise<LockResult> {
  * Release a distributed lock
  */
 export async function releaseLock(lockName: string): Promise<boolean> {
-  const lockId = `cron:${lockName}`;
+  const lockId = lockName.startsWith('cron:') ? lockName : `cron:${lockName}`;
   
   try {
+    // First try to release only if we hold it (safe path)
     const result = await CronLock.deleteOne({
       _id: lockId,
-      holder: INSTANCE_ID, // Only release if we hold it
+      holder: INSTANCE_ID,
     });
     
     if (result.deletedCount > 0) {
-      console.log(`Lock released: ${lockId}`);
+      log.info(`Lock released: ${lockId}`, { lockId });
       return true;
     }
     
-    console.log(`Lock not released (not held by us): ${lockId}`);
+    // If we couldn't release by holder match, it might be because INSTANCE_ID
+    // changed (e.g. serverless cold start). In withLock context, we know we
+    // acquired it, so force-release if it's past the TTL.
+    const lock = await CronLock.findById(lockId);
+    if (lock && lock.expiresAt < new Date()) {
+      await CronLock.deleteOne({ _id: lockId });
+      log.info(`Lock force-released (expired): ${lockId}`, { lockId });
+      return true;
+    }
+    
+    log.warn(`Lock not released (not held by us or still valid): ${lockId}`, { lockId });
     return false;
   } catch (error) {
-    console.error('Error releasing lock:', error);
+    log.error('Error releasing lock', { lockId, error: error instanceof Error ? error.message : 'Unknown' });
     return false;
   }
 }
@@ -173,7 +189,7 @@ export async function releaseLock(lockName: string): Promise<boolean> {
  * Extend the TTL of a held lock
  */
 export async function extendLock(lockName: string, additionalSeconds: number): Promise<boolean> {
-  const lockId = `cron:${lockName}`;
+  const lockId = lockName.startsWith('cron:') ? lockName : `cron:${lockName}`;
   const newExpiry = new Date(Date.now() + additionalSeconds * 1000);
   
   try {
@@ -189,7 +205,7 @@ export async function extendLock(lockName: string, additionalSeconds: number): P
     
     return result.modifiedCount > 0;
   } catch (error) {
-    console.error('Error extending lock:', error);
+    log.error('Error extending lock', { lockId, error: error instanceof Error ? error.message : 'Unknown' });
     return false;
   }
 }
@@ -198,7 +214,7 @@ export async function extendLock(lockName: string, additionalSeconds: number): P
  * Check if a lock is currently held
  */
 export async function isLocked(lockName: string): Promise<{ locked: boolean; holder?: string; expiresAt?: Date }> {
-  const lockId = `cron:${lockName}`;
+  const lockId = lockName.startsWith('cron:') ? lockName : `cron:${lockName}`;
   
   try {
     const lock = await CronLock.findById(lockId);
@@ -213,7 +229,7 @@ export async function isLocked(lockName: string): Promise<{ locked: boolean; hol
       expiresAt: lock.expiresAt,
     };
   } catch (error) {
-    console.error('Error checking lock:', error);
+    log.error('Error checking lock', { lockId, error: error instanceof Error ? error.message : 'Unknown' });
     return { locked: false };
   }
 }
@@ -246,6 +262,11 @@ export async function withLock<T>(
       error: error instanceof Error ? error.message : 'Unknown error',
     };
   } finally {
-    await releaseLock(lockName);
+    // Always release, even if fn() threw
+    try {
+      await releaseLock(lockName);
+    } catch (releaseError) {
+      log.error(`Failed to release lock ${lockName} in finally block`, { error: releaseError instanceof Error ? releaseError.message : 'Unknown' });
+    }
   }
 }

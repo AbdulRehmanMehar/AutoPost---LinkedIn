@@ -10,6 +10,7 @@ import {
 } from './types';
 import { IPlatformConnection } from '../models/Page';
 import { BasePlatformAdapter } from './base-adapter';
+import { fetchWithTimeout } from '../circuit-breaker';
 import crypto from 'crypto';
 
 const TWITTER_API_BASE = 'https://api.twitter.com/2';
@@ -494,6 +495,8 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
       let searchQuery = query;
       if (excludeRetweets) searchQuery += ' -is:retweet';
       if (excludeReplies) searchQuery += ' -is:reply';
+      // Restrict to English tweets for better relevance
+      searchQuery += ' lang:en';
 
       const params = new URLSearchParams({
         query: searchQuery,
@@ -505,14 +508,21 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
 
       if (sinceId) params.append('since_id', sinceId);
 
-      const response = await fetch(
+      // Log token info for debugging (last 8 chars of token to check staleness)
+      const tokenSuffix = connection.accessToken?.slice(-8) || 'MISSING';
+      console.log(`[Twitter Search] Executing query: "${searchQuery}" (token: ...${tokenSuffix})`);
+
+      const response = await fetchWithTimeout(
         `${TWITTER_API_BASE}/tweets/search/recent?${params.toString()}`,
         {
           headers: {
             'Authorization': `Bearer ${connection.accessToken}`,
           },
+          timeoutMs: 15_000,
         }
       );
+
+      console.log(`[Twitter Search] Response status: ${response.status} for query: "${query}"`);
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({}));
@@ -541,6 +551,12 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
       }
 
       const data = await response.json();
+      
+      // Log search metadata for debugging (result count, query used)
+      const resultCount = data.meta?.result_count ?? data.data?.length ?? 0;
+      if (resultCount === 0) {
+        console.log(`[Twitter Search] Query "${query}" → 0 results (meta: ${JSON.stringify(data.meta || {})})`);
+      }
       
       // Map users by ID for easy lookup
       const usersById = new Map<string, TwitterUser>();
@@ -652,18 +668,19 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
   ): Promise<{ success: boolean; error?: string }> {
     try {
       // First get the authenticated user's ID
-      const meResponse = await fetch(`${TWITTER_API_BASE}/users/me`, {
+      const meResponse = await fetchWithTimeout(`${TWITTER_API_BASE}/users/me`, {
         headers: { 'Authorization': `Bearer ${connection.accessToken}` },
+        timeoutMs: 10_000,
       });
       
       if (!meResponse.ok) {
-        return { success: false, error: 'Could not get user info' };
+        return { success: false, error: `Could not get user info (${meResponse.status})` };
       }
       
       const meData = await meResponse.json();
       const userId = meData.data?.id;
 
-      const response = await fetch(`${TWITTER_API_BASE}/users/${userId}/likes`, {
+      const response = await fetchWithTimeout(`${TWITTER_API_BASE}/users/${userId}/likes`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${connection.accessToken}`,
@@ -791,17 +808,18 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
   }> {
     try {
       // Get our user ID first
-      const meResponse = await fetch(`${TWITTER_API_BASE}/users/me`, {
+      const meResponse = await fetchWithTimeout(`${TWITTER_API_BASE}/users/me`, {
         headers: {
           'Authorization': `Bearer ${connection.accessToken}`,
         },
+        timeoutMs: 10_000,
       });
       
       if (!meResponse.ok) {
         return {
           success: false,
           newReplies: [],
-          error: 'Could not get user info',
+          error: `Could not get user info (${meResponse.status}${meResponse.status === 401 ? ' Unauthorized' : ''})`,
         };
       }
       
@@ -827,10 +845,11 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
 
       console.log(`[Twitter] Checking mentions for user ${ourUserId}`);
       
-      const response = await fetch(url, {
+      const response = await fetchWithTimeout(url, {
         headers: {
           'Authorization': `Bearer ${connection.accessToken}`,
         },
+        timeoutMs: 15_000,
       });
 
       if (!response.ok) {
@@ -912,14 +931,15 @@ class TwitterAdapter extends BasePlatformAdapter implements IPlatformAdapter {
    */
   async getOwnUserId(connection: IPlatformConnection): Promise<string | null> {
     try {
-      const response = await fetch(`${TWITTER_API_BASE}/users/me`, {
+      const response = await fetchWithTimeout(`${TWITTER_API_BASE}/users/me`, {
         headers: {
           'Authorization': `Bearer ${connection.accessToken}`,
         },
+        timeoutMs: 10_000,
       });
 
       if (!response.ok) {
-        console.warn('Failed to get own user ID from Twitter API');
+        console.warn(`Failed to get own user ID from Twitter API (${response.status})`);
         return null;
       }
 

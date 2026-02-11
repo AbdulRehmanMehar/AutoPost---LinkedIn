@@ -25,6 +25,13 @@ const TOKEN_WARNING_HOURS = 24;      // Warn when token expires in less than 24 
 const TOKEN_CRITICAL_HOURS = 6;      // Critical when less than 6 hours
 const EMAIL_COOLDOWN_HOURS = 24;     // Don't send duplicate emails within this period
 
+// Platform-specific warning thresholds — avoids over-refreshing short-lived tokens
+const PLATFORM_WARNING_HOURS: Record<string, number> = {
+  twitter: 1,       // Twitter tokens last ~2h, refresh only when < 1h left
+  facebook: 24,     // Facebook long-lived tokens last 60 days
+  linkedin: 24,     // LinkedIn tokens last 60 days
+};
+
 interface TokenCheckResult {
   pageId: string;
   pageName: string;
@@ -259,7 +266,8 @@ export async function GET(request: Request) {
         }
         
         const isExpired = isTokenExpired(connection.tokenExpiresAt);
-        const isExpiringSoon = isTokenExpiringSoon(connection.tokenExpiresAt, TOKEN_WARNING_HOURS);
+        const platformWarningHours = PLATFORM_WARNING_HOURS[connection.platform] ?? TOKEN_WARNING_HOURS;
+        const isExpiringSoon = isTokenExpiringSoon(connection.tokenExpiresAt, platformWarningHours);
         
         // Token is fine
         if (!isExpired && !isExpiringSoon) {

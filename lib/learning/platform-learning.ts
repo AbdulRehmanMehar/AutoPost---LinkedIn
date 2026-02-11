@@ -85,7 +85,7 @@ function formatHour(hour: number): string {
  * Validate ObjectId string
  */
 function isValidObjectId(id: string): boolean {
-  return /^[a-f\\d]{24}$/i.test(id);
+  return /^[a-f\d]{24}$/i.test(id);
 }
 
 /**

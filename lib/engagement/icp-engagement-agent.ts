@@ -120,6 +120,16 @@ export async function runICPEngagementAgent(
       throw new Error('No active Twitter connection found');
     }
 
+    // Helper: Reload fresh Twitter connection from DB (avoids stale token race with token-refresh cron)
+    async function getFreshTwitterConnection(): Promise<IPlatformConnection> {
+      const freshPage = await Page.findById(pageId);
+      const conn = freshPage?.connections?.find(
+        (c: IPlatformConnection) => c.platform === 'twitter' && c.isActive
+      );
+      if (!conn) throw new Error('Twitter connection lost during execution');
+      return conn;
+    }
+
     // 2. Analyze or load ICP profile
     console.log(`[ICP Agent] Analyzing ICP for page ${pageId}...`);
     const icpResult = await analyzePageICP({ pageId, includeDataSources: true, includeHistoricalPosts: true });
@@ -152,13 +162,23 @@ export async function runICPEngagementAgent(
     // 4. Collect candidates from all queries
     const allCandidates: EngagementCandidate[] = [];
 
-    for (const searchQuery of queriesToRun) {
+    for (let qi = 0; qi < queriesToRun.length; qi++) {
+      const searchQuery = queriesToRun[qi];
       try {
-        console.log(`[ICP Agent] Searching: "${searchQuery.query}"`);
+        // Rate limit: Twitter Free tier allows 1 search/15s, Basic allows 60/15min
+        // Add a delay between queries to stay within rate limits
+        if (qi > 0) {
+          await new Promise(resolve => setTimeout(resolve, 2_000));
+        }
+
+        console.log(`[ICP Agent] Searching (${qi + 1}/${queriesToRun.length}): "${searchQuery.query}"`);
         queriesExecuted++;
 
+        // Reload fresh token before each search to avoid stale-token race with token-refresh cron
+        const freshConnection = await getFreshTwitterConnection();
+
         const searchResult = await twitterAdapter.searchTweets(
-          twitterConnection,
+          freshConnection,
           searchQuery.query,
           {
             maxResults: config.maxTweetsPerQuery,
@@ -168,13 +188,59 @@ export async function runICPEngagementAgent(
         );
 
         if (!searchResult.success) {
-          errors.push(`Search failed for "${searchQuery.query}": ${searchResult.error}`);
+          const errorMsg = `Search failed for "${searchQuery.query}": ${searchResult.error}`;
+          console.warn(`[ICP Agent] ${errorMsg}`);
+          errors.push(errorMsg);
+          
+          // If it's a rate limit or auth error, stop searching
+          if (searchResult.error?.includes('Rate limited') || searchResult.error?.includes('Unauthorized')) {
+            console.warn(`[ICP Agent] Stopping searches due to API error: ${searchResult.error}`);
+            break;
+          }
           continue;
         }
 
         const tweets = searchResult.tweets || [];
         tweetsFound += tweets.length;
-        console.log(`[ICP Agent] Found ${tweets.length} tweets for query.`);
+        console.log(`[ICP Agent] Found ${tweets.length} tweets for query "${searchQuery.query}".`);
+
+        // If query returns 0 results, try a simplified version (first 2 words)
+        if (tweets.length === 0) {
+          const words = searchQuery.query.trim().split(/\s+/);
+          if (words.length > 2) {
+            const simplifiedQuery = words.slice(0, 2).join(' ');
+            console.log(`[ICP Agent] Retrying with simplified query: "${simplifiedQuery}"`);
+            
+            const retryResult = await twitterAdapter.searchTweets(
+              freshConnection,
+              simplifiedQuery,
+              {
+                maxResults: config.maxTweetsPerQuery,
+                excludeRetweets: true,
+                excludeReplies: true,
+              }
+            );
+            
+            if (retryResult.success && retryResult.tweets && retryResult.tweets.length > 0) {
+              console.log(`[ICP Agent] Simplified query found ${retryResult.tweets.length} tweets.`);
+              tweetsFound += retryResult.tweets.length;
+              
+              // Process these tweets through the same evaluation pipeline
+              for (const tweet of retryResult.tweets) {
+                tweetsEvaluated++;
+                const filterResult = passesBasicFilters(tweet, config);
+                if (!filterResult.pass) continue;
+                const recentEngagement = await hasRecentEngagement(pageId, tweet.authorId, config.cooldownMinutes);
+                if (recentEngagement) continue;
+                
+                const evaluation = await evaluateTweetRelevance(tweet, icpProfile, searchQuery.intent);
+                if (evaluation.relevanceScore >= config.minRelevanceScore) {
+                  allCandidates.push(evaluation);
+                }
+              }
+            }
+          }
+        }
 
         // Filter and evaluate tweets
         for (const tweet of tweets) {
@@ -261,9 +327,10 @@ export async function runICPEngagementAgent(
           });
           repliesSuccessful++;
         } else {
-          // Actually post the reply
+          // Actually post the reply — use fresh token to avoid stale-token issues
+          const replyConnection = await getFreshTwitterConnection();
           const replyResult = await twitterAdapter.replyToTweet(
-            twitterConnection,
+            replyConnection,
             candidate.tweet.id,
             reply
           );
@@ -441,7 +508,9 @@ async function evaluateTweetRelevance(
   icpProfile: ICPProfile,
   intent: string
 ): Promise<EngagementCandidate> {
-  const prompt = `You are evaluating whether this tweet is from our Ideal Customer Profile (ICP).
+  const prompt = `Evaluate if this tweet is from our Ideal Customer Profile (ICP).
+
+IMPORTANT: Output ONLY valid JSON. No explanations, no markdown, no code blocks, no text before or after. Do NOT use <think> tags. Just the raw JSON object.
 
 ## Our Target ICP:
 Roles: ${icpProfile.targetAudience.roles.join(', ')}
@@ -457,27 +526,13 @@ Tweet: "${tweet.text}"
 Metrics: ${tweet.metrics.likes} likes, ${tweet.metrics.replies} replies, ${tweet.metrics.retweets} RTs
 
 ## Scoring Guide:
-RELEVANCE (0-10):
-- 8-10: Perfect ICP match - author clearly fits target role/industry AND discusses relevant pain point
-- 5-7: Good match - author likely in target audience OR discussing relevant topic
-- 3-4: Weak match - tangentially related
-- 0-2: Not ICP - wrong audience or promotional content
+RELEVANCE (0-10): 8-10 perfect ICP match, 5-7 good match, 3-4 weak, 0-2 not ICP
+ENGAGEMENT POTENTIAL (0-10): 8-10 asking for help, 5-7 discussing topic, 3-4 venting, 0-2 spam
 
-ENGAGEMENT POTENTIAL (0-10):
-- 8-10: Asking for help, sharing struggle, open to input
-- 5-7: Discussing topic, might appreciate insights
-- 3-4: Just venting, less receptive
-- 0-2: Promotional, closed-ended, or spam
+Score generously - if they discuss problems our ICP has, they're worth engaging.
 
-Score generously - if they're discussing problems our ICP has, they're probably worth engaging.
-
-Respond ONLY with this JSON (no markdown, no explanation):
-{
-  "relevanceScore": 5,
-  "engagementPotential": 6,
-  "reasons": ["specific reasons why this is/isn't a good match"],
-  "replyAngle": "what value we can add in a reply"
-}`;
+Output this exact JSON structure:
+{"relevanceScore": 5, "engagementPotential": 6, "reasons": ["reason1", "reason2"], "replyAngle": "what value we can add"}`;
 
   try {
     const response = await createChatCompletion({
@@ -548,7 +603,7 @@ async function generateReply(
   
   const selectedFormula = replyFormulas[Math.floor(Math.random() * replyFormulas.length)];
   
-  const systemPrompt = `You are a Twitter engagement expert who writes replies that make people click your profile.
+  const systemPrompt = `You write Twitter replies that make people click your profile. Return ONLY the reply text. No quotes, no explanations, no meta-commentary. Do NOT use <think> tags.
 
 ## Your Expertise:
 ${icpProfile.valueProposition.expertise.join(', ')}
@@ -558,68 +613,16 @@ Tone: ${icpProfile.engagementStyle.tone}
 Do: ${icpProfile.engagementStyle.doThis.join('; ')}
 Don't: ${icpProfile.engagementStyle.avoidThis.join('; ')}
 
-## PROVEN REPLY PRINCIPLES (research-backed):
-
-### 1. PATTERN INTERRUPT OPENERS (pick one):
-- Start with a specific number: "3 things most people miss here..."
-- Start with mild disagreement: "Unpopular take:" or "This is 80% right, but..."
-- Start with a story hook: "Made this mistake last year."
-- Start with a question: "But what about..."
-- Start direct (no greeting): Never say "Hey" or "@username"
-
-### 2. THE 80/20 VALUE RULE:
-- Give 80% value in the reply itself (be genuinely helpful)
-- The remaining 20% should make them curious about YOU
-- Don't link, just leave them wanting more
-
-### 3. REPLY STRUCTURES THAT WORK:
-${selectedFormula === 'CONTRARIAN' ? `
-- "Actually, this works better when..."
-- "I'd add one thing: [specific insight]"
-- "This is true, except when [nuance]"
-- "Counterpoint: [respectful disagreement]"` : ''}
-${selectedFormula === 'STORY' ? `
-- "Made this mistake last year. Here's what happened..."
-- "Tried this with [X]. The result surprised me."
-- "Learned this the hard way when..."` : ''}
-${selectedFormula === 'DATA' ? `
-- "The data says [specific stat]..."
-- "87% of [audience] miss this: [insight]"
-- "Tested this across [N] [things]. Found that..."` : ''}
-${selectedFormula === 'QUESTION' ? `
-- "Curious - how do you handle [specific edge case]?"
-- "What about when [challenging scenario]?"
-- "Does this change if [variable]?"` : ''}
-${selectedFormula === 'FRAMEWORK' ? `
-- "I think of it as [simple framework]..."
-- "My mental model: [brief concept]"
-- "The way I break it down: [1], [2], [3]"` : ''}
-${selectedFormula === 'MISTAKE' ? `
-- "I got this wrong for years. The fix: [specific]"
-- "Biggest mistake I made with this: [specific]"
-- "What I wish I knew earlier: [insight]"` : ''}
-${selectedFormula === 'CURIOSITY' ? `
-- "There's a second-order effect most miss..."
-- "The real unlock is [tease without explaining]..."
-- "This is just the surface. The deeper pattern..."` : ''}
-
-### 4. WHAT MAKES PEOPLE CLICK YOUR PROFILE:
-- Demonstrate unexpected expertise
-- Show personality (not corporate speak)
-- Leave them wanting more context
-- Be the person they'd want to follow for more insights
-
-### 5. HARD RULES:
+## REPLY RULES:
 - NO sycophantic openers ("Great point!", "Love this!", "So true!")
-- NO self-promotion or links
-- NO hashtags in replies
+- NO self-promotion or links or hashtags
 - NO emojis unless they used them
 - NO generic advice anyone could give
-- MAXIMUM 280 characters (ideally 200-250)
+- MAXIMUM 280 characters (aim for 200-250)
 - Sound like a REAL human, not a bot
-- Be SPECIFIC not generic
+- Be SPECIFIC to their tweet
 
-## YOUR FORMULA FOR THIS REPLY: ${selectedFormula}`;
+## YOUR FORMULA: ${selectedFormula}`;
 
   const userPrompt = `Write a reply using the ${selectedFormula} formula.
 
@@ -788,42 +791,17 @@ async function scoreReplyQuality(
 ): Promise<{ score: number; issues: string[]; passesQuality: boolean }> {
   const prompt = `Score this Twitter reply for engagement quality.
 
-ORIGINAL TWEET:
-"${originalTweet}"
+IMPORTANT: Output ONLY valid JSON. No explanations, no markdown, no code blocks. Do NOT use <think> tags. Just the raw JSON object.
 
-AUTHOR BIO:
-"${authorBio}"
+ORIGINAL TWEET: "${originalTweet}"
+AUTHOR BIO: "${authorBio}"
+REPLY TO EVALUATE: "${reply}"
 
-REPLY TO EVALUATE:
-"${reply}"
+Score 1-10 each: specificity, valueAdd, conversationStarter, authenticity, profileClickPotential.
+RED FLAGS (auto fail): sycophantic praise, generic advice, self-promotional, buzzwords.
 
-SCORING CRITERIA (rate 1-10 each):
-1. SPECIFICITY - Does it address the specific tweet or is it generic? (generic = 1, highly specific = 10)
-2. VALUE ADD - Does it add new information, perspective, or insight? (no value = 1, high value = 10)
-3. CONVERSATION STARTER - Would this make the author want to respond? (boring = 1, engaging = 10)
-4. AUTHENTICITY - Does it sound human and genuine? (bot-like = 1, authentic = 10)
-5. PROFILE CLICK POTENTIAL - Would this make someone curious to check the replier's profile? (no = 1, definitely = 10)
-
-RED FLAGS (automatic fail):
-- Starts with sycophantic praise ("Great point!", "Love this!")
-- Generic advice anyone could give
-- Self-promotional
-- Uses corporate buzzwords
-- Doesn't relate to the original tweet
-
-Respond ONLY in JSON:
-{
-  "scores": {
-    "specificity": X,
-    "valueAdd": X,
-    "conversationStarter": X,
-    "authenticity": X,
-    "profileClickPotential": X
-  },
-  "overallScore": X (average),
-  "issues": ["list any problems"],
-  "passesQuality": true/false (true if overallScore >= 5 and no red flags)
-}`;
+Output this exact JSON structure:
+{"scores": {"specificity": 5, "valueAdd": 5, "conversationStarter": 5, "authenticity": 5, "profileClickPotential": 5}, "overallScore": 5, "issues": [], "passesQuality": true}`;
 
   try {
     const response = await createChatCompletion({

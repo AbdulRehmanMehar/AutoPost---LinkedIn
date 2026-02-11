@@ -23,15 +23,20 @@ export async function GET(request: NextRequest) {
     }
 
     // Check required env vars
+    const aiProvider = process.env.AI_PROVIDER || 'ollama';
+    const aiConfigured = aiProvider === 'ollama' 
+      ? !!process.env.OLLAMA_BASE_URL || true  // Ollama has defaults
+      : !!process.env.GROQ_API_KEY;
+
     const envStatus = {
-      GROQ_API_KEY: !!process.env.GROQ_API_KEY,
+      AI_CONFIGURED: aiConfigured,
       MONGODB_URI: !!process.env.MONGODB_URI,
       NEXTAUTH_SECRET: !!process.env.NEXTAUTH_SECRET,
       LINKEDIN_CLIENT_ID: !!process.env.LINKEDIN_CLIENT_ID,
       RESEND_API_KEY: !!process.env.RESEND_API_KEY,
     };
 
-    const allEnvOk = envStatus.GROQ_API_KEY && envStatus.MONGODB_URI && 
+    const allEnvOk = envStatus.AI_CONFIGURED && envStatus.MONGODB_URI && 
                      envStatus.NEXTAUTH_SECRET && envStatus.LINKEDIN_CLIENT_ID;
 
     return NextResponse.json({
@@ -39,7 +44,7 @@ export async function GET(request: NextRequest) {
       status: dbStatus === 'connected' && allEnvOk ? 'ok' : 'degraded',
       services: {
         database: dbStatus,
-        ai: envStatus.GROQ_API_KEY ? 'configured' : 'missing',
+        ai: `${aiProvider}${aiConfigured ? ' (configured)' : ' (missing)'}`,
         email: envStatus.RESEND_API_KEY ? 'configured' : 'not_configured',
         linkedin: envStatus.LINKEDIN_CLIENT_ID ? 'configured' : 'missing',
       },

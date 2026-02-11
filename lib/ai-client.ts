@@ -1,12 +1,20 @@
 /**
- * Groq AI Client with MongoDB-backed Usage Tracking
+ * AI Client with MongoDB-backed Usage Tracking
+ * 
+ * Supports both Ollama (local) and Groq (cloud) backends via OpenAI-compatible API.
+ * Configure via environment variables:
+ *   AI_PROVIDER=ollama|groq (default: ollama)
+ *   OLLAMA_BASE_URL=http://192.168.1.9:11434 (default)
+ *   OLLAMA_MODEL=qwen2.5:7b (default)
+ *   GROQ_API_KEY=... (only needed if AI_PROVIDER=groq)
  * 
  * Features:
  * 1. Tracks token usage per model in MongoDB (persists across restarts)
- * 2. Proactively switches models before hitting limits
- * 3. Falls back to other models on 429 errors
- * 4. Respects both daily AND per-minute limits
- * 5. Uses actual Groq dashboard limits
+ * 2. Proactively switches models before hitting limits (Groq mode)
+ * 3. Falls back to other models on 429 errors (Groq mode)
+ * 4. Respects both daily AND per-minute limits (Groq mode)
+ * 5. Strips <think> tags from reasoning models (qwen family)
+ * 6. Single model mode for Ollama (no rotation needed)
  */
 
 import OpenAI from 'openai';
@@ -19,6 +27,16 @@ import AIUsage, {
   type ModelLimits,
   type IAIUsage,
 } from './models/AIUsage';
+
+// ============================================
+// Provider Configuration
+// ============================================
+
+const AI_PROVIDER = (process.env.AI_PROVIDER || 'ollama') as 'ollama' | 'groq';
+const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://192.168.1.9:11434';
+const OLLAMA_MODEL = process.env.OLLAMA_MODEL || 'qwen2.5:7b';
+
+console.log(`[AI] Provider: ${AI_PROVIDER}, ${AI_PROVIDER === 'ollama' ? `Model: ${OLLAMA_MODEL}, URL: ${OLLAMA_BASE_URL}` : 'Groq Cloud'}`);
 
 // Safety threshold - switch models at this % of limit
 const DAILY_THRESHOLD = 0.90;   // 90% of daily limit
@@ -309,6 +327,11 @@ async function getUsagePercent(model: string): Promise<number> {
  * but we prefer "real" models when they have capacity.
  */
 async function getAvailableModel(preferFast: boolean = false, estimatedTokens: number = 2000): Promise<string> {
+  // Ollama mode: always use the configured model (no rotation needed)
+  if (AI_PROVIDER === 'ollama') {
+    return OLLAMA_MODEL;
+  }
+
   const allModels = preferFast ? FAST_MODEL_PRIORITY : MODEL_PRIORITY;
   
   // Calculate usage % and capacity for all models
@@ -380,13 +403,18 @@ async function getAvailableModel(preferFast: boolean = false, estimatedTokens: n
 }
 
 // ============================================
-// Groq Client
+// AI Client (supports Ollama and Groq)
 // ============================================
 
-const groqClient = new OpenAI({
-  apiKey: process.env.GROQ_API_KEY,
-  baseURL: 'https://api.groq.com/openai/v1',
-});
+const aiClient = AI_PROVIDER === 'ollama'
+  ? new OpenAI({
+      apiKey: 'ollama',  // Ollama doesn't need a real key
+      baseURL: `${OLLAMA_BASE_URL}/v1`,
+    })
+  : new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
 
 /**
  * Parse retry-after from error or headers
@@ -477,7 +505,7 @@ export async function createChatCompletion(
     try {
       console.log(`[AI] Using ${model} (attempt ${attempt + 1}/${maxRetries + 1})`);
       
-      const response = await groqClient.chat.completions.create({
+      const response = await aiClient.chat.completions.create({
         model,
         messages,
         temperature,
@@ -489,8 +517,14 @@ export async function createChatCompletion(
         await recordUsage(model, response.usage.total_tokens, true);
       }
       
-      const content = response.choices[0]?.message?.content || null;
+      let content = response.choices[0]?.message?.content || null;
       const finishReason = response.choices[0]?.finish_reason;
+      
+      // Strip <think> tags that qwen and other reasoning models output
+      if (content) {
+        content = content.replace(/<think>[\s\S]*?<\/think>/gi, '').trim();
+        content = content.replace(/<think>[\s\S]*/gi, '').trim(); // unclosed tags
+      }
       
       // Debug: Log finish reason and content info
       console.log(`[AI] Response: finish_reason=${finishReason}, content_length=${content?.length || 0}`);
@@ -513,14 +547,22 @@ export async function createChatCompletion(
     } catch (error) {
       lastError = error as Error;
       
-      // Check if it's a rate limit error
+      // Check if it's a rate limit error (Groq only - Ollama doesn't rate limit)
       const status = (error as { status?: number }).status;
       const code = (error as { code?: string }).code;
       
-      if (status === 429 || code === 'rate_limit_exceeded') {
+      if (AI_PROVIDER === 'groq' && (status === 429 || code === 'rate_limit_exceeded')) {
         await recordRateLimitHit(model);
         console.log(`[AI] Rate limited on ${model}, switching to next model...`);
         continue;
+      }
+
+      // For Ollama connection errors, provide helpful message
+      if (AI_PROVIDER === 'ollama') {
+        const msg = (error as Error).message || '';
+        if (msg.includes('ECONNREFUSED') || msg.includes('fetch failed')) {
+          console.error(`[AI] Cannot connect to Ollama at ${OLLAMA_BASE_URL}. Is Ollama running?`);
+        }
       }
       
       // For other errors, record and throw
@@ -580,7 +622,10 @@ export async function getUsageStatus(): Promise<Record<string, {
   await refreshDailyCache();
   const status: Record<string, any> = {};
   
-  for (const model of MODEL_PRIORITY) {
+  // In Ollama mode, just show the Ollama model
+  const modelsToCheck = AI_PROVIDER === 'ollama' ? [OLLAMA_MODEL] : MODEL_PRIORITY;
+  
+  for (const model of modelsToCheck) {
     const limits = GROQ_MODEL_LIMITS[model];
     if (!limits) continue;
     
@@ -634,7 +679,7 @@ export async function getTotalCapacity(): Promise<{
   return {
     totalUsed,
     totalLimit,
-    percentUsed: Math.round((totalUsed / totalLimit) * 1000) / 10,
+    percentUsed: totalLimit > 0 ? Math.round((totalUsed / totalLimit) * 1000) / 10 : 0,
     availableModels,
     unlimitedModels,
   };
@@ -655,6 +700,23 @@ export async function getSelectedModel(preferFast: boolean = false): Promise<{
     tokensLimit: number | null;
   }>;
 }> {
+  // In Ollama mode, return the single configured model
+  if (AI_PROVIDER === 'ollama') {
+    const usage = await getDailyUsage(OLLAMA_MODEL);
+    return {
+      model: OLLAMA_MODEL,
+      usagePercent: 0,
+      reasoning: `Ollama local model (${OLLAMA_BASE_URL})`,
+      allModels: [{
+        model: OLLAMA_MODEL,
+        usagePercent: 0,
+        hasCapacity: true,
+        tokensUsed: usage.tokens,
+        tokensLimit: null,
+      }],
+    };
+  }
+
   const allModels = preferFast ? FAST_MODEL_PRIORITY : MODEL_PRIORITY;
   const modelDetails: Array<{
     model: string;
@@ -710,7 +772,10 @@ export async function getSelectedModel(preferFast: boolean = false): Promise<{
 }
 
 // Export the raw client for advanced usage
-export { groqClient };
+export { aiClient, aiClient as groqClient };  // groqClient alias for backward compatibility
+
+// Export provider config
+export { AI_PROVIDER, OLLAMA_BASE_URL, OLLAMA_MODEL };
 
 // Export model lists and limits
 export { GROQ_MODEL_LIMITS, MODEL_PRIORITY, FAST_MODEL_PRIORITY };

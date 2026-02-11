@@ -205,26 +205,16 @@ ${postSummaries}`);
  * Use AI to generate a detailed ICP profile from page context
  */
 async function generateICPProfile(pageContext: string): Promise<ICPProfile> {
-  const systemPrompt = `You are an expert at building Ideal Customer Profiles (ICPs) for B2B SaaS companies.
+  const systemPrompt = `You build Ideal Customer Profiles (ICPs) for B2B SaaS companies.
+
+IMPORTANT: Output ONLY valid JSON. No explanations, no markdown code blocks, no text before or after the JSON. Do NOT use <think> tags. Just the raw JSON object.
 
 An effective ICP has three components:
 1. URGENT + IMPORTANT PROBLEM - They have a real pain point
 2. BUDGET - They can pay for solutions (decision makers)
 3. UNDERSERVED - Current solutions aren't 10x better
 
-Your job is to analyze the content strategy, data sources, and historical posts to:
-1. Identify WHO the target audience is (roles, industries, seniority)
-2. Identify their PAIN POINTS (problems they're struggling with)
-3. Generate SEARCH QUERIES to find these people on Twitter
-4. Define ENGAGEMENT GUIDELINES for replying to their posts
-
-For search queries, think about:
-- What would ICPs tweet when they're frustrated?
-- What hashtags do they use?
-- What questions do they ask?
-- What tools/topics do they discuss?
-
-Output a JSON object with the ICP profile structure.`;
+Analyze the content strategy and posts to identify the target audience, pain points, search queries, and engagement guidelines.`;
 
   const userPrompt = `Analyze this page's content to build an ICP profile:
 
@@ -375,7 +365,11 @@ export async function refineICPFromResults(
     return currentProfile; // Not enough data
   }
 
-  const prompt = `Current ICP search queries:
+  const prompt = `Adjust ICP search queries based on engagement results.
+
+IMPORTANT: Output ONLY a valid JSON array. No explanations, no markdown, no code blocks. Do NOT use <think> tags. Just the raw JSON array.
+
+Current ICP search queries:
 ${currentProfile.searchQueries.map(q => `- "${q.query}" (priority: ${q.priority})`).join('\n')}
 
 Queries that got engagement:
@@ -384,9 +378,10 @@ ${goodQueries.join('\n') || 'None yet'}
 Queries with no engagement:
 ${badQueries.join('\n') || 'None'}
 
-Adjust the search queries based on what's working. Increase priority of similar queries to good ones, decrease or remove similar queries to bad ones.
+Increase priority of queries similar to good ones. Decrease or remove queries similar to bad ones.
 
-Return the updated searchQueries array as JSON.`;
+Output format (JSON array only):
+[{"query": "search term", "intent": "problem_awareness", "priority": 8}]`;
 
   const response = await createChatCompletion({
     messages: [{ role: 'user', content: prompt }],

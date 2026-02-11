@@ -8,6 +8,7 @@ import {
   PlatformType,
 } from './types';
 import { IPlatformConnection } from '../models/Page';
+import { CircuitBreaker, fetchWithTimeout } from '../circuit-breaker';
 
 const LINKEDIN_API_BASE = 'https://api.linkedin.com/v2';
 const LINKEDIN_REST_API_BASE = 'https://api.linkedin.com/rest';
@@ -306,19 +307,39 @@ export class LinkedInAdapter extends BasePlatformAdapter {
     postId: string
   ): Promise<PlatformMetrics> {
     try {
-      const response = await fetch(
+      // Circuit breaker: stop hammering LinkedIn socialActions if 403
+      const breaker = CircuitBreaker.for('linkedin:socialActions:metrics', {
+        failureThreshold: 3,
+        resetTimeoutMs: 60 * 60 * 1000,
+        instantTripCodes: [403],
+      });
+
+      if (!breaker.allowRequest()) {
+        console.log(`[LinkedIn] Skipping metrics fetch: ${breaker.getRejectionReason()}`);
+        return {
+          platform: 'linkedin',
+          connectionId: connection.platformId,
+          lastUpdated: new Date(),
+        };
+      }
+
+      const response = await fetchWithTimeout(
         `${LINKEDIN_API_BASE}/socialActions/${encodeURIComponent(postId)}`,
         {
           headers: {
             'Authorization': `Bearer ${connection.accessToken}`,
             'X-Restli-Protocol-Version': '2.0.0',
           },
+          timeoutMs: 15_000,
         }
       );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch metrics');
+        breaker.recordFailure(response.status);
+        throw new Error(`Failed to fetch metrics (${response.status})`);
       }
+
+      breaker.recordSuccess();
 
       const data = await response.json();
       

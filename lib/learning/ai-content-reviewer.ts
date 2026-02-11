@@ -98,7 +98,9 @@ export async function reviewContentForPublishing(
 - Judge authenticity by specificity of details, not pronouns`
     : `This is a PERSONAL page using "I" voice. Standard authenticity rules apply.`;
 
-  const systemPrompt = `You are an elite social media editor who can instantly spot AI-generated content. Your job is to ensure posts are both AUTHENTIC and HIGH-CONVERTING.
+  const systemPrompt = `You are an elite social media editor who spots AI-generated content. Your job is to ensure posts are AUTHENTIC and HIGH-CONVERTING.
+
+IMPORTANT: Output ONLY valid JSON. No explanations, no markdown code blocks, no text before or after the JSON. Do NOT use <think> tags. Just the raw JSON object.
 
 You evaluate posts on two dimensions:
 1. AUTHENTICITY - Does it sound like a real human/company wrote it?

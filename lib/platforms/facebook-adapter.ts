@@ -8,6 +8,7 @@ import {
   PlatformType,
 } from './types';
 import { IPlatformConnection } from '../models/Page';
+import { CircuitBreaker, fetchWithTimeout } from '../circuit-breaker';
 
 const FACEBOOK_GRAPH_API = 'https://graph.facebook.com/v18.0';
 
@@ -202,13 +203,32 @@ export class FacebookAdapter extends BasePlatformAdapter {
     postId: string
   ): Promise<PlatformMetrics> {
     try {
-      const response = await fetch(
-        `${FACEBOOK_GRAPH_API}/${postId}?fields=insights.metric(post_impressions,post_engaged_users,post_reactions_by_type_total),shares,comments.summary(true),reactions.summary(true)&access_token=${connection.accessToken}`
+      // Circuit breaker: stop hammering Facebook if it's timing out
+      const breaker = CircuitBreaker.for(`facebook:metrics:${connection.platformId}`, {
+        failureThreshold: 3,
+        resetTimeoutMs: 30 * 60 * 1000, // 30 min backoff
+      });
+
+      if (!breaker.allowRequest()) {
+        console.log(`[Facebook] Skipping metrics fetch: ${breaker.getRejectionReason()}`);
+        return {
+          platform: 'facebook',
+          connectionId: connection.platformId,
+          lastUpdated: new Date(),
+        };
+      }
+
+      const response = await fetchWithTimeout(
+        `${FACEBOOK_GRAPH_API}/${postId}?fields=insights.metric(post_impressions,post_engaged_users,post_reactions_by_type_total),shares,comments.summary(true),reactions.summary(true)&access_token=${connection.accessToken}`,
+        { timeoutMs: 15_000 }
       );
 
       if (!response.ok) {
-        throw new Error('Failed to fetch metrics');
+        breaker.recordFailure(response.status);
+        throw new Error(`Failed to fetch metrics (${response.status})`);
       }
+
+      breaker.recordSuccess();
 
       const data = await response.json();
       
