@@ -603,26 +603,23 @@ async function generateReply(
   
   const selectedFormula = replyFormulas[Math.floor(Math.random() * replyFormulas.length)];
   
-  const systemPrompt = `You write Twitter replies that make people click your profile. Return ONLY the reply text. No quotes, no explanations, no meta-commentary. Do NOT use <think> tags.
+  const systemPrompt = `You write Twitter replies that make people click your profile. Return ONLY the reply text. No quotes, no explanations, no meta-commentary. No <think> tags. Just the reply.
 
-## Your Expertise:
-${icpProfile.valueProposition.expertise.join(', ')}
-
-## Your Engagement Style:
+Your expertise: ${icpProfile.valueProposition.expertise.join(', ')}
 Tone: ${icpProfile.engagementStyle.tone}
 Do: ${icpProfile.engagementStyle.doThis.join('; ')}
 Don't: ${icpProfile.engagementStyle.avoidThis.join('; ')}
 
-## REPLY RULES:
+RULES:
 - NO sycophantic openers ("Great point!", "Love this!", "So true!")
-- NO self-promotion or links or hashtags
+- NO self-promotion, links, or hashtags
 - NO emojis unless they used them
 - NO generic advice anyone could give
 - MAXIMUM 280 characters (aim for 200-250)
-- Sound like a REAL human, not a bot
-- Be SPECIFIC to their tweet
+- Be SPECIFIC to their tweet content
+- Sound like a real person, not a bot
 
-## YOUR FORMULA: ${selectedFormula}`;
+FORMULA TO USE: ${selectedFormula}`;
 
   const userPrompt = `Write a reply using the ${selectedFormula} formula.
 

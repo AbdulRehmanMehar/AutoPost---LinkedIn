@@ -98,201 +98,76 @@ export async function reviewContentForPublishing(
 - Judge authenticity by specificity of details, not pronouns`
     : `This is a PERSONAL page using "I" voice. Standard authenticity rules apply.`;
 
-  const systemPrompt = `You are an elite social media editor who spots AI-generated content. Your job is to ensure posts are AUTHENTIC and HIGH-CONVERTING.
+  const systemPrompt = `You are a social media editor. You review posts and output a JSON decision.
 
-IMPORTANT: Output ONLY valid JSON. No explanations, no markdown code blocks, no text before or after the JSON. Do NOT use <think> tags. Just the raw JSON object.
-
-You evaluate posts on two dimensions:
-1. AUTHENTICITY - Does it sound like a real human/company wrote it?
-2. CONVERSION POTENTIAL - Will it drive engagement AND traffic?
+OUTPUT RULES:
+1. Output ONLY valid JSON. No text before or after. No markdown code blocks.
+2. No <think> tags. No reasoning outside the JSON.
+3. Start your response with { and end with }.
 
 ${voiceGuidance}
 
-EVALUATION CRITERIA:
+SCORING GUIDE:
 
-1. **AUTHENTICITY (0-10)** - THE MOST IMPORTANT CRITERION
-   - Does this sound like a REAL ${isOrganization ? 'COMPANY' : 'PERSON'} wrote it?
-   - Does it share genuine insights or lessons?
-   - Or is it generic observations that anyone could make?
-   
-   INSTANT FAILURES (score 0-3):
-   ${isOrganization 
-     ? `- Makes up fake client names or companies ("fintech client", "Series B startup")
-   - Fabricates specific metrics without context ("60% improvement", "$40k saved")
-   - Sounds like a press release (corporate speak without substance)`
-     : `- Makes up fake stories about "a client" or "someone I worked with"
-   - Fabricates specific metrics ("34% conversion boost", "400ms latency")
-   - Sounds like someone else's experience, not authentic reflection`}
-   - Generic observations without personal insight
-   - Could have been written by any ${isOrganization ? 'consulting firm' : 'content creator'}
-   
-   AVERAGE (score 4-6):
-   - Shares real lessons but feels formulaic
-   - Has insights but lacks personal voice
-   - Educational but impersonal
-   
-   EXCELLENT (score 7-10):
-   - Shares genuine lessons from real experience
-   - Reads like ${isOrganization ? 'a company sharing honest learnings' : 'someone reflecting on their journey'}
-   - Has a strong, clear opinion or insight
-   - Educational value comes from authentic reflection, not fabricated case studies
+AUTHENTICITY (0-10) - most important:
+- Score 0-3: Fabricated stats, fake client names, generic AI-sounding copy
+- Score 4-6: Real lessons but formulaic or impersonal
+- Score 7-10: Genuine insight, strong opinion, sounds human
 
-2. **Hook Quality (0-10)** - CRITICAL FOR CONVERSION
-   - Does the first line make you STOP scrolling?
-   - Is it under 210 characters? (Must fit before "see more")
-   - Does it create CURIOSITY (raise a question in the reader's mind)?
-   
-   TERRIBLE HOOKS (score 0-3):
-   - "We've seen many startups prioritize quick fixes..."
-   - "In today's fast-paced world..."
-   - "It's no secret that..."
-   - Any hook that could apply to any company
-   - Hook over 210 characters
-   
-   GREAT HOOKS (score 8-10):
-   - "We mass-deleted 14,000 lines of code last Friday."
-   - "$200k revenue. 47 lines of code. No framework."
-   - Contains a specific number, action, or surprising fact
-   - Creates immediate curiosity (makes you want to know more)
+HOOK QUALITY (0-10):
+- Score 0-3: Generic openers like "In today's world...", "We've seen many..."
+- Score 8-10: Specific, surprising, creates curiosity
 
-3. **AI Detection (critical check)**
-   RED FLAGS that indicate AI-generated content:
-   - Em dashes (—) anywhere in the text
-   - "not just X, but Y" sentence structure
-   - "It's worth noting", "This is where X comes in"
-   - "Moreover", "Furthermore", "Additionally"
-   - "prioritize X over Y", "balance X and Y"
-   - "hidden liability", "brick wall", "strategic architecture"
-   - "long-term success", "future-proof", "sustainable growth"
-   - Generic closing questions like "What are your thoughts?"
-   - "game-changing", "revolutionary", "seamlessly"
-   
-   If you detect 2+ of these: AUTOMATIC REJECTION
+AI RED FLAGS (list any you find):
+- Em dashes, "Moreover/Furthermore/Additionally", "not just X but Y"
+- "Game-changing", "revolutionary", "leverage", "utilize", "seamlessly"
+- "prioritize X over Y", "It's worth noting", "The truth is"
+- "What are your thoughts?" (weak closing)
+- Fabricated percentages or metrics without real context
+- 3+ red flags = reject
 
-4. **Structure Check (PAS + Curiosity Loops)**
-   Does the post follow proven formulas?
-   - PAS (Problem-Agitate-Solve): Identifies problem → builds tension → delivers insight
-   - Curiosity Loops: Raises questions → delays answers → mini-payoffs → new questions
-   - NOT: Just stating observations or listing tips
+DECISIONS:
+- PUBLISH: authenticity >= 7, hook >= 6, 0-1 red flags, overall >= 70
+- NEEDS_REVISION: authenticity 5-6, or weak hook but good story, or 2 fixable red flags
+- REJECT: authenticity < 5, or hook < 4, or 3+ red flags, or all generic, or fabricated stats`;
 
-5. **Engagement Potential (0-10)** - FOR FOLLOWERS
-   - Will this spark conversation?
-   - Does the CTA invite the reader to share THEIR story?
-   - Bad: "What are your thoughts?" (too generic)
-   - Good: "What's the most expensive shortcut you've taken?"
-   - Is there a strong OPINION that people will agree/disagree with?
+  const userPrompt = `Review this ${platform} post. Output JSON only.
 
-6. **Traffic Potential (0-10)** - FOR CONVERSIONS
-   - Does it demonstrate expertise that makes people want to learn more?
-   - Does it create desire for the solution/service implicitly?
-   - Is there a clear transformation shown (before → after)?
-
-7. **Brand/Voice Alignment (0-10)**
-   - Does it match the specified tone?
-   - Is it appropriate for the target audience?
-
-8. **Risk Assessment (low/medium/high/critical)**
-   - Controversial or offensive content?
-   - Factual claims that could be wrong?
-   - Legal concerns?
-
-DECISION RULES:
-
-**PUBLISH**: 
-- Authenticity score ≥ 7
-- Hook score ≥ 6
-- No AI detection red flags (or only 1)
-- Overall score ≥ 70
-- Risk is low
-- Has clear PAS structure or curiosity loop
-
-**NEEDS_REVISION**:
-- Authenticity score 5-6 (has potential but needs work)
-- OR Hook is weak but story is good
-- OR 2 AI detection red flags that could be fixed
-- OR Good story but weak closing question
-
-**REJECT**:
-- Authenticity score < 5 (sounds like AI/marketing)
-- OR Hook score < 4 (generic opener)
-- OR 3+ AI detection red flags
-- OR starts with banned phrases ("We've seen many...", etc.)
-- OR overall score < 50
-- OR high/critical risk
-- OR no specific story/example (just observations)
-
-Be HARSH. It's better to reject generic content than publish it. Generic content hurts engagement and brand perception.
-
-Output valid JSON only.`;
-
-  const userPrompt = `Review this ${platform} post for automatic publishing.
-
-FIRST, check for these INSTANT REJECTION criteria:
-1. ${isOrganization 
-  ? 'Does it fabricate fake client names or companies?'
-  : 'Does it make up fake stories with invented metrics?'}
-2. Does it contain 3+ AI red flag phrases?
-3. Is it generic advice with NO personal insight or lesson?
-4. Could any ${isOrganization ? 'consulting firm' : 'content creator'} in the industry have written this exact post?
-
-If ANY of the above are true, reject immediately with authenticity score < 5.
-
-NOTE: Educational posts sharing genuine principles and lessons are GOOD, even without specific case studies. 
-Focus on whether the insight feels authentic, not whether it has made-up client names.
-
----
-CONTENT TO REVIEW:
+POST:
 ${content}
----
 
-${strategy ? `
-BRAND STRATEGY:
-- Persona: ${strategy.persona || 'Not specified'}
-- Target Audience: ${strategy.targetAudience || 'Not specified'}
-- Tone: ${strategy.tone || 'professional'}
-- Topics: ${strategy.topics?.join(', ') || 'Not specified'}
-- Preferred Angles: ${strategy.preferredAngles?.join(', ') || 'Not specified'}
-${strategy.avoidTopics?.length ? `- Avoid Topics: ${strategy.avoidTopics.join(', ')}` : ''}
-${strategy.customInstructions ? `- Custom Instructions: ${strategy.customInstructions}` : ''}
-` : ''}
+${platform === 'twitter' ? `TWITTER NOTES: Tweets are max 280 chars. Don't penalize brevity. Reward punchiness and strong opinions. A sharp 200-char take is better than a generic 260-char tweet.` : ''}
+${strategy ? `BRAND: ${strategy.persona || 'Professional'}. Audience: ${strategy.targetAudience || 'Professionals'}.` : ''}
+${topic ? `Topic: ${topic}.` : ''} ${angle ? `Angle: ${angle}.` : ''}
 
-${topic ? `TOPIC: ${topic}` : ''}
-${angle ? `INTENDED ANGLE: ${angle}` : ''}
+QUICK CHECKS (reject if any are true):
+1. Contains fabricated stats or percentages without real context?
+2. Contains 3+ AI red flag phrases?
+3. Completely generic with no personal insight?
+4. Contains made-up client names or companies?
 
-${sourceContent ? `
-SOURCE CONTENT BEING REPURPOSED:
-Title: ${sourceContent.title || 'N/A'}
-Summary: ${sourceContent.summary || 'N/A'}
-` : ''}
+NOTE: Educational posts sharing real principles ARE good. A strong opinion without fake stats is GOOD. Don't reject authentic content just because it's simple.
 
-${recentPerformance ? `
-RECENT PERFORMANCE DATA:
-- Average Engagement: ${recentPerformance.avgEngagement}
-- Top Performing Angles: ${recentPerformance.topPerformingAngles.join(', ')}
-- Audience Preferences: ${recentPerformance.audiencePreferences.join(', ')}
-` : ''}
+If rejecting, suggestedRevisions MUST say exactly WHAT to fix. Not "be more authentic" but "Replace '40% faster' with a real lesson like 'We rebuilt it from scratch. Took 6 weeks.'"
 
-Evaluate this content and provide your decision in this exact JSON format:
+Respond with this exact JSON structure:
 {
-  "approved": boolean,
-  "decision": "publish" | "needs_revision" | "reject",
+  "approved": true or false,
+  "decision": "publish" or "needs_revision" or "reject",
   "criteria": {
-    "authenticity": { "score": number, "feedback": "string", "aiRedFlagsFound": ["string"] },
-    "hookQuality": { "score": number, "feedback": "string" },
-    "contentQuality": { "score": number, "feedback": "string" },
-    "brandAlignment": { "score": number, "feedback": "string" },
-    "riskAssessment": { "level": "low|medium|high|critical", "concerns": ["string"] },
-    "engagementPotential": { "score": number, "reasoning": "string" },
-    "platformFit": { "score": number, "feedback": "string" },
-    "overallScore": number
+    "authenticity": { "score": 0-10, "feedback": "why", "aiRedFlagsFound": [] },
+    "hookQuality": { "score": 0-10, "feedback": "why" },
+    "contentQuality": { "score": 0-10, "feedback": "why" },
+    "brandAlignment": { "score": 0-10, "feedback": "why" },
+    "riskAssessment": { "level": "low", "concerns": [] },
+    "engagementPotential": { "score": 0-10, "reasoning": "why" },
+    "platformFit": { "score": 0-10, "feedback": "why" },
+    "overallScore": 0-100
   },
-  "reasoning": "string explaining your decision - be specific about what's wrong",
-  "suggestedRevisions": ["string"] (required if needs_revision - give specific, actionable fixes),
-  "recommendedScheduleTime": {
-    "reason": "string",
-    "urgency": "immediate|optimal_time|flexible"
-  },
-  "confidence": number (0-1)
+  "reasoning": "one sentence explaining your decision",
+  "suggestedRevisions": ["specific fix 1", "specific fix 2"],
+  "recommendedScheduleTime": { "reason": "why", "urgency": "flexible" },
+  "confidence": 0.0-1.0
 }`;
 
   try {
@@ -312,11 +187,47 @@ Evaluate this content and provide your decision in this exact JSON format:
     }
 
     // Extract JSON from response (handle markdown code blocks)
-    const jsonMatch = resultContent.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
+    // First strip markdown code block wrappers if present
+    let jsonStr = resultContent.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    
+    // Try to find the outermost JSON object by matching balanced braces
+    let braceCount = 0;
+    let jsonStart = -1;
+    let jsonEnd = -1;
+    for (let i = 0; i < jsonStr.length; i++) {
+      if (jsonStr[i] === '{') {
+        if (braceCount === 0) jsonStart = i;
+        braceCount++;
+      } else if (jsonStr[i] === '}') {
+        braceCount--;
+        if (braceCount === 0) {
+          jsonEnd = i;
+          break;
+        }
+      }
+    }
+    
+    if (jsonStart === -1 || jsonEnd === -1) {
       throw new Error('No JSON found in response');
     }
-    const decision = JSON.parse(jsonMatch[0]) as ReviewDecision;
+    
+    let extractedJson = jsonStr.substring(jsonStart, jsonEnd + 1);
+    
+    let decision: ReviewDecision;
+    try {
+      decision = JSON.parse(extractedJson) as ReviewDecision;
+    } catch (parseError) {
+      // Try cleaning common issues: trailing commas, unescaped newlines in strings
+      extractedJson = extractedJson
+        .replace(/,\s*([}\]])/g, '$1')  // Remove trailing commas
+        .replace(/[\r\n]+/g, ' ')       // Flatten newlines
+        .replace(/\\'/g, "'");          // Fix escaped single quotes
+      try {
+        decision = JSON.parse(extractedJson) as ReviewDecision;
+      } catch (retryParseError) {
+        throw new Error(`Failed to parse review JSON: ${(retryParseError as Error).message}`);
+      }
+    }
     
     // Validate the decision
     if (typeof decision.approved !== 'boolean' || !decision.decision || !decision.criteria) {

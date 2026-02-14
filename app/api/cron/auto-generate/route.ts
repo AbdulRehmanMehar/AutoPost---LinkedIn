@@ -293,36 +293,71 @@ Transform this blog post into an engaging LinkedIn post. Extract the key insight
             } as PageContentStrategy;
             
             // Generate content optimized for this platform
-            const generatedResult = await generatePostWithStrategy({
-              strategy: strategyWithPageType,
-              topic: sourceContentItem?.title ? `Repurposing: ${sourceContentItem.title}` : undefined,
-              angle: recommendedAngle,
-              inspiration: platformInspiration,
-              pageId: page._id.toString(),
-              platform: platform as 'linkedin' | 'facebook' | 'twitter' | 'instagram',
-            });
+            // RETRY LOOP: If AI reviewer rejects, regenerate with feedback (up to 3 attempts)
+            const MAX_GENERATION_ATTEMPTS = 3;
+            let generatedResult = { content: '', angle: '', topic: '' };
+            let reviewDecision: ReviewDecision | null = null;
+            let rejectionFeedback = '';
 
-            // AI REVIEWER: Autonomous quality assessment and publish decision
-            console.log(`AI reviewing content for ${platform}...`);
-            
-            const reviewDecision: ReviewDecision = await reviewContentForPublishing({
-              content: generatedResult.content,
-              platform,
-              strategy: strategyWithPageType,
-              topic: sourceContentItem?.title,
-              angle: recommendedAngle,
-              sourceContent: sourceContentItem ? {
-                title: sourceContentItem.title,
-                summary: sourceContentItem.body.slice(0, 500),
-              } : undefined,
-              recentPerformance: learningContext.hasEnoughData ? {
-                avgEngagement: learningContext.timingConfidence, // Use as proxy for engagement data quality
-                topPerformingAngles: learningContext.topAngles,
-                audiencePreferences: learningContext.platformTips,
-              } : undefined,
-            });
+            for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+              // Build inspiration with rejection feedback from previous attempts
+              let attemptInspiration = platformInspiration;
+              if (rejectionFeedback) {
+                attemptInspiration += `\n\n## IMPORTANT - YOUR PREVIOUS ATTEMPT WAS REJECTED:\n${rejectionFeedback}\n\nWrite something COMPLETELY DIFFERENT this time. Do NOT repeat the same patterns. Be more authentic, more opinionated, and avoid fabricated statistics.`;
+              }
 
-            console.log(`AI Review for ${platform}: ${reviewDecision.decision} (Score: ${reviewDecision.criteria.overallScore}, Confidence: ${reviewDecision.confidence})`);
+              generatedResult = await generatePostWithStrategy({
+                strategy: strategyWithPageType,
+                topic: sourceContentItem?.title ? `Repurposing: ${sourceContentItem.title}` : undefined,
+                angle: attempt > 1 ? undefined : recommendedAngle, // Try different angle on retry
+                inspiration: attemptInspiration,
+                pageId: page._id.toString(),
+                platform: platform as 'linkedin' | 'facebook' | 'twitter' | 'instagram',
+              });
+
+              // AI REVIEWER: Autonomous quality assessment and publish decision
+              console.log(`AI reviewing content for ${platform} (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})...`);
+              
+              reviewDecision = await reviewContentForPublishing({
+                content: generatedResult.content,
+                platform,
+                strategy: strategyWithPageType,
+                topic: sourceContentItem?.title,
+                angle: recommendedAngle,
+                sourceContent: sourceContentItem ? {
+                  title: sourceContentItem.title,
+                  summary: sourceContentItem.body.slice(0, 500),
+                } : undefined,
+                recentPerformance: learningContext.hasEnoughData ? {
+                  avgEngagement: learningContext.timingConfidence,
+                  topPerformingAngles: learningContext.topAngles,
+                  audiencePreferences: learningContext.platformTips,
+                } : undefined,
+              });
+
+              console.log(`AI Review for ${platform} (attempt ${attempt}): ${reviewDecision.decision} (Score: ${reviewDecision.criteria.overallScore}, Confidence: ${reviewDecision.confidence})`);
+
+              // If not rejected, break out of retry loop
+              if (reviewDecision.decision !== 'reject') {
+                break;
+              }
+
+              // Build feedback for next attempt
+              rejectionFeedback = `REJECTION REASON: ${reviewDecision.reasoning}`;
+              if (reviewDecision.suggestedRevisions?.length) {
+                rejectionFeedback += `\nSUGGESTED FIXES: ${reviewDecision.suggestedRevisions.join('; ')}`;
+              }
+              if (reviewDecision.criteria.authenticity?.aiRedFlagsFound?.length) {
+                rejectionFeedback += `\nAI RED FLAGS DETECTED: ${reviewDecision.criteria.authenticity.aiRedFlagsFound.join(', ')}`;
+              }
+
+              console.log(`Attempt ${attempt} rejected for ${platform}, ${attempt < MAX_GENERATION_ATTEMPTS ? 'retrying with feedback...' : 'giving up after max retries'}`);
+            }
+
+            // Use the final review decision (from last attempt)
+            if (!reviewDecision) {
+              throw new Error('No review decision generated');
+            }
 
             // Build AI analysis from review
             const aiAnalysis = {

@@ -486,7 +486,7 @@ Rules:
   for (let attempt = 1; attempt <= 3; attempt++) {
     const result = await createChatCompletion({
       messages: [
-        { role: 'system', content: 'You write authentic social media replies. Return ONLY the reply text. No explanations, no meta-commentary. Do NOT use <think> tags.' },
+        { role: 'system', content: 'You write authentic social media replies. Return ONLY the reply text. No explanations, no meta-commentary, no hashtags, no <think> tags. Just the reply.' },
         { role: 'user', content: prompt },
       ],
       temperature: 0.8,
