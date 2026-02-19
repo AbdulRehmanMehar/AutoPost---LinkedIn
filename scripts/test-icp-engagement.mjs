@@ -46,7 +46,7 @@ async function main() {
       dryRun: true,                    // Don't actually post
       maxQueriesToRun: 5,              // Run all test queries
       maxRepliesToSend: 3,             // Generate up to 3 replies
-      minRelevanceScore: 4,            // Lower threshold for testing
+      minRelevanceScore: 6,            // Production threshold — only quality matches
       maxTweetsPerQuery: 15,           // Get more tweets per query
       minFollowers: 50,                // Lower follower threshold
       maxFollowers: 500000,            // Higher max
@@ -65,9 +65,28 @@ async function main() {
     console.log(`Duration: ${(result.completedAt.getTime() - result.startedAt.getTime()) / 1000}s`);
 
     if (result.icpProfile) {
+      const icp = result.icpProfile;
       console.log('\n📎 ICP PROFILE:');
-      console.log(`  Target Audience: ${result.icpProfile.targetAudience.roles.slice(0, 3).join(', ')}`);
-      console.log(`  Pain Points: ${result.icpProfile.painPoints.slice(0, 3).map(p => p.problem).join('; ')}`);
+      console.log(`  Roles:        ${icp.targetAudience.roles.slice(0, 3).join(', ')}`);
+      console.log(`  Industries:   ${icp.targetAudience.industries.slice(0, 3).join(', ')}`);
+      console.log(`  Pain Points:  ${icp.painPoints.slice(0, 3).map(p => `[${p.urgency}] ${p.problem}`).join('\n                ')}`);
+      if (icp.psychographics) {
+        console.log('\n🧠 PSYCHOGRAPHICS:');
+        console.log(`  Values:        ${icp.psychographics.values}`);
+        console.log(`  Belief:        ${icp.psychographics.beliefSystem}`);
+        console.log(`  #1 Fear:       ${icp.psychographics.fears}`);
+        console.log(`  Spending Logic:${icp.psychographics.spendingLogic}`);
+      }
+      if (icp.theHunger) {
+        console.log(`\n🔥 THE HUNGER:   ${icp.theHunger}`);
+      }
+      if (icp.theCrapTheyDealWith) {
+        console.log(`\n💩 VENDOR BAGGAGE: ${icp.theCrapTheyDealWith}`);
+      }
+      console.log(`\n🔎 SEARCH QUERIES (top 5):`);
+      icp.searchQueries.slice(0, 5).forEach(q => {
+        console.log(`  [p${q.priority}] "${q.query}" (${q.intent})`);
+      });
     }
 
     if (result.engagements.length > 0) {

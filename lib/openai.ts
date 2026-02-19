@@ -112,6 +112,15 @@ export interface PageContentStrategy {
   pageType?: PageVoiceType;  // Determines if content uses "I" or "We" voice
 }
 
+// Minimal ICP persona snapshot passed into content generation for persona-aware writing
+export interface ICPPersonaSnapshot {
+  name?: string;             // e.g. "Modernizing Michael" (optional, for context)
+  fears: string;             // Their #1 professional fear
+  theHunger: string;         // The urgent desire they want solved
+  spendingLogic: string;     // ROI framing they respond to
+  theCrapTheyDealWith: string; // What they've been burned by before
+}
+
 export interface GenerateWithStrategyOptions {
   strategy: PageContentStrategy;
   topic?: string; // Optional specific topic to write about
@@ -119,6 +128,7 @@ export interface GenerateWithStrategyOptions {
   inspiration?: string; // Optional content inspiration (e.g., from blog)
   pageId?: string; // Optional page ID for fetching learning insights
   platform?: 'linkedin' | 'facebook' | 'twitter' | 'instagram'; // Platform for insights
+  icpPersona?: ICPPersonaSnapshot; // Optional ICP persona for persona-aware content
 }
 
 export async function generateLinkedInPost(options: GeneratePostOptions): Promise<string> {
@@ -286,6 +296,10 @@ const POST_ANGLE_DESCRIPTIONS: Record<string, string> = {
   insight: 'Share a useful observation or tip that your audience might not have considered. Be educational.',
   how_to: 'Provide a step-by-step approach or framework for solving a problem. Be practical and actionable.',
   case_study: 'Share a specific example with real results. Include numbers or concrete outcomes where possible.',
+  // Chris Do ICP framework angles — high-converting because they speak to fear, hunger, and ROI
+  cost_of_inaction: 'Show what happens when someone DOES NOT solve this problem. Make the compounding cost of delay real and concrete. The goal is not to scare — it is to help them truly feel the pain of waiting. End with a question that forces self-reflection.',
+  dollarize_value: 'Translate a technical decision, process, or mistake into the client’s own financial terms. Show what X hours of delay, Y lines of bad code, or Z wrong hire actually costs in revenue, opportunity, or time. Make the abstract concrete with real-world math.',
+  hungry_buyer: 'Write directly for someone who already knows they have the problem and is actively looking for a solution. Skip the education. Speak to the already-convinced buyer. Validate their urgency, show you understand the hunger, and offer the clearest possible signal of your unique angle.',
 };
 
 // Get angle descriptions adjusted for page type - emphasizing STORIES
@@ -300,6 +314,10 @@ function getAngleDescription(angle: string, pageType: PageVoiceType = 'personal'
     insight: `Teach ONE non-obvious insight about the industry or craft. Lead with the counterintuitive part. "Everyone thinks X, but actually Y..." Pure education, no invented data or percentages.`,
     how_to: `Teach a specific approach or technique. Be practical and actionable. Only use real numbers if you genuinely have them. Do NOT invent statistics.`,
     case_study: `Educational analysis of real-world patterns. NEVER invent client names, costs, or metrics. If you don't have real data, share the PRINCIPLE instead. No fabricated percentages.`,
+    // Chris Do ICP framework angles
+    cost_of_inaction: `Show what happens when someone does NOT solve this problem. Make the compounding cost of delay feel real and concrete — not abstract or theoretical. Think: time wasted, opportunities missed, technical debt compounding. ${isOrg ? 'We\'ve seen' : 'I\'ve seen'} teams wait too long to address X and pay double later. End with a question that forces the reader to reflect on their own situation. No fabricated numbers — use principles.`,
+    dollarize_value: `Translate a technical decision, process, or mistake into the reader\'s own financial or business terms. Make the cost concrete: what does X hours of delay actually mean in missed revenue or engineer time? What does the wrong hire cost over 6 months? Frame the insight so the reader can immediately map it to their own P&L. No invented dollar figures — use the MATH of the principle.`,
+    hungry_buyer: `Write directly for someone who already knows they have the problem and is actively looking for a solution. Skip the education and awareness stage. Speak to the already-convinced, urgency-driven buyer. Open with validation of their urgency ("If you\'re actively trying to solve X right now..."), show ${we} understand the specific hunger, and close with the clearest signal possible of ${our} unique angle. Short. Direct. No fluff.`,
   };
   return angleDescriptions[angle] || `Share educational knowledge and insights. Never fabricate. Teach real principles and methods.`;
 }
@@ -313,7 +331,7 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
   angle: string;
   topic: string;
 }> {
-  const { strategy, topic, angle, inspiration, pageId, platform } = options;
+  const { strategy, topic, angle, inspiration, pageId, platform, icpPersona } = options;
   
   // Determine the voice type based on page type
   const pageType = strategy.pageType || 'personal';
@@ -387,6 +405,18 @@ export async function generatePostWithStrategy(options: GenerateWithStrategyOpti
       console.warn('Could not fetch learning insights:', error);
       // Continue without learning insights - not critical
     }
+  }
+
+  // Inject ICP persona context for psychographic-aware writing
+  if (icpPersona) {
+    parts.push('');
+    parts.push('## ICP PERSONA CONTEXT (write so THIS person feels personally seen):');
+    if (icpPersona.name) parts.push(`Persona: ${icpPersona.name}`);
+    parts.push(`Their #1 fear: ${icpPersona.fears}`);
+    parts.push(`What they hunger for: ${icpPersona.theHunger}`);
+    parts.push(`Their spending logic: ${icpPersona.spendingLogic}`);
+    parts.push(`What burned them before: ${icpPersona.theCrapTheyDealWith}`);
+    parts.push('Use this context to make the post feel like it was written SPECIFICALLY for them. Mirror their fears and hunger in how you frame the problem and solution. Do NOT mention these details explicitly — just let them shape the tone and framing.');
   }
 
   if (inspiration) {

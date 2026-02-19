@@ -16,6 +16,7 @@ import Page, { IPage, ContentStrategy, DatabaseSource } from '../models/Page';
 import Post from '../models/Post';
 import { fetchContentForGeneration } from '../data-sources/database';
 import { createChatCompletion } from '../ai-client';
+import { findMatchingPersona } from './icp-personas';
 
 // ============================================
 // Types
@@ -29,7 +30,28 @@ export interface ICPProfile {
     companySize: string[];     // "Seed to Series A", "10-50 employees"
     seniority: string[];       // "Founders", "VPs", "Directors"
   };
-  
+
+  // Biographic signals — used to qualify ICP match from bios/tweets
+  biographics?: {
+    incomeBracket: string;     // e.g. "$300k–$600k total comp"
+    titleTier: string;         // e.g. "C-suite / VP-level decision maker"
+    stabilitySignals: string;  // e.g. "established career, long tenures, family-oriented"
+  };
+
+  // Psychographic profile — the "Why they buy" layer (Chris Do framework)
+  psychographics?: {
+    values: string;            // What they hold sacred professionally
+    beliefSystem: string;      // Their core worldview / operating philosophy
+    fears: string;             // Their #1 professional fear
+    spendingLogic: string;     // How they justify purchasing internally (ROI framing)
+  };
+
+  // The desperate desire — what they are STARVING for (Chris Do's "hunger")
+  theHunger?: string;
+
+  // Past vendor frustrations — used to build empathy and differentiate in replies
+  theCrapTheyDealWith?: string;
+
   // Pain points they talk about (for search)
   painPoints: {
     problem: string;
@@ -179,6 +201,32 @@ ${postSummaries}`);
     
     // Generate ICP Profile using AI
     const profile = await generateICPProfile(context.join('\n\n'));
+
+    // Enrich psychographic fields from pre-built personas if AI left them sparse
+    const hasPsychoData = profile.psychographics?.fears && profile.theHunger && profile.theCrapTheyDealWith;
+    if (!hasPsychoData) {
+      const matchedPersona = findMatchingPersona({
+        industries: profile.targetAudience?.industries,
+        roles: profile.targetAudience?.roles,
+        keywords: profile.painPoints?.flatMap(p => p.keywords),
+      });
+      if (matchedPersona) {
+        console.log(`[ICP Analyzer] Enriching sparse psychographics from pre-built persona: ${matchedPersona.personaName}`);
+        profile.biographics ??= {
+          incomeBracket: matchedPersona.incomeBracket,
+          titleTier: matchedPersona.titleTier,
+          stabilitySignals: matchedPersona.stabilitySignals,
+        };
+        profile.psychographics ??= {
+          values: matchedPersona.values,
+          beliefSystem: matchedPersona.beliefSystem,
+          fears: matchedPersona.fears,
+          spendingLogic: matchedPersona.spendingLogic,
+        };
+        profile.theHunger ??= matchedPersona.theHunger;
+        profile.theCrapTheyDealWith ??= matchedPersona.theCrapTheyDealWith;
+      }
+    }
     
     return {
       success: true,
@@ -205,16 +253,20 @@ ${postSummaries}`);
  * Use AI to generate a detailed ICP profile from page context
  */
 async function generateICPProfile(pageContext: string): Promise<ICPProfile> {
-  const systemPrompt = `You build Ideal Customer Profiles (ICPs) for B2B SaaS companies.
+  const systemPrompt = `You build deep Ideal Customer Profiles (ICPs) rooted in the Chris Do framework.
 
 IMPORTANT: Output ONLY valid JSON. No explanations, no markdown code blocks, no text before or after the JSON. Do NOT use <think> tags. Just the raw JSON object.
 
-An effective ICP has three components:
-1. URGENT + IMPORTANT PROBLEM - They have a real pain point
-2. BUDGET - They can pay for solutions (decision makers)
-3. UNDERSERVED - Current solutions aren't 10x better
+An effective ICP has five layers:
+1. BIOGRAPHICS - Who they are on paper (title, income, stability)
+2. PSYCHOGRAPHICS - How they think, what they fear, how they justify spending (deeper than demographics)
+3. THE HUNGER - The urgent, burning desire they are STARVING to solve right now
+4. THE CRAP THEY DEAL WITH - Past vendor failures and current frustrations (builds empathy)
+5. URGENT PROBLEM + BUDGET + UNDERSERVED market position
 
-Analyze the content strategy and posts to identify the target audience, pain points, search queries, and engagement guidelines.`;
+Spending logic insight: the bigger the problem in the CLIENT's mind, the bigger the budget. Decode their spending logic to understand what ROI framing they respond to.
+
+Analyze the content strategy and posts to extract all five layers.`;
 
   const userPrompt = `Analyze this page's content to build an ICP profile:
 
@@ -228,6 +280,19 @@ Generate a detailed ICP profile in this EXACT JSON format:
     "companySize": ["company stages/sizes"],
     "seniority": ["decision-making levels"]
   },
+  "biographics": {
+    "incomeBracket": "estimated total comp range e.g. $300k-$600k",
+    "titleTier": "decision-making seniority e.g. C-suite / VP-level",
+    "stabilitySignals": "lifestyle/career markers e.g. established career, long tenures"
+  },
+  "psychographics": {
+    "values": "what they hold sacred professionally (1-2 sentences)",
+    "beliefSystem": "their core worldview or operating philosophy (1-2 sentences)",
+    "fears": "their #1 professional fear - what keeps them up at night (1 sentence)",
+    "spendingLogic": "how they justify a purchase internally - what ROI framing resonates (1-2 sentences)"
+  },
+  "theHunger": "the urgent burning desire they are STARVING to solve right now — not just a problem, but a desperate want (1-2 sentences)",
+  "theCrapTheyDealWith": "specific past vendor failures, internal politics, and current frustrations that make them cynical about new solutions (2-3 sentences)",
   "painPoints": [
     {
       "problem": "specific problem description",
@@ -238,7 +303,7 @@ Generate a detailed ICP profile in this EXACT JSON format:
   "topicsOfInterest": ["topics they care about"],
   "valueProposition": {
     "expertise": ["what we know that can help them"],
-    "uniqueAngle": "our 10x better positioning",
+    "uniqueAngle": "our 10x better positioning — why we're different from the vendors they've been burned by",
     "avoidTopics": ["topics to NOT engage on"]
   },
   "searchQueries": [
@@ -249,10 +314,10 @@ Generate a detailed ICP profile in this EXACT JSON format:
     }
   ],
   "engagementStyle": {
-    "tone": "how to sound",
+    "tone": "how to sound — match their worldview, not our brand voice",
     "doThis": ["engagement best practices"],
-    "avoidThis": ["things to never do"],
-    "exampleReplies": ["2-3 example replies that would resonate"]
+    "avoidThis": ["things to never do — especially the patterns that remind them of bad vendors"],
+    "exampleReplies": ["2-3 example replies that resonate with their hunger and fears"]
   }
 }
 

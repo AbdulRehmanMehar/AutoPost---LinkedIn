@@ -232,7 +232,13 @@ export async function runICPEngagementAgent(
                 if (!filterResult.pass) continue;
                 const recentEngagement = await hasRecentEngagement(pageId, tweet.authorId, config.cooldownMinutes);
                 if (recentEngagement) continue;
-                
+
+                const topicOk = passesTopicFilter(tweet, icpProfile);
+                if (!topicOk.pass) {
+                  console.log(`[ICP Agent] Filtered out @${tweet.author?.username}: ${topicOk.reason}`);
+                  continue;
+                }
+
                 const evaluation = await evaluateTweetRelevance(tweet, icpProfile, searchQuery.intent);
                 if (evaluation.relevanceScore >= config.minRelevanceScore) {
                   allCandidates.push(evaluation);
@@ -261,6 +267,13 @@ export async function runICPEngagementAgent(
           );
           if (recentEngagement) {
             console.log(`[ICP Agent] Cooldown active for @${tweet.author?.username}`);
+            continue;
+          }
+
+          // Quick topic filter before calling AI (saves tokens on clearly off-topic tweets)
+          const topicResult = passesTopicFilter(tweet, icpProfile);
+          if (!topicResult.pass) {
+            console.log(`[ICP Agent] Filtered out @${tweet.author?.username}: ${topicResult.reason}`);
             continue;
           }
 
@@ -478,6 +491,55 @@ function passesBasicFilters(tweet: TwitterSearchResult, config: AgentConfig): { 
   // Allow tweets with URLs - they can still be valuable engagement opportunities
   // Removed: hasUrl filter
 
+  // Filter out job seekers, career-advice content, and non-buyers — they are not decision-makers
+  const jobSeekerPatterns: RegExp[] = [
+    /what skills should i (work on|develop|learn|focus on|build)/i,
+    /how (do|can) i (get into|become a?n?|land a?n?|break into)/i,
+    /(looking for|seeking|want) (my first|a new|an?) (job|role|position|opportunity)/i,
+    /should i (learn|apply for|study|take a course|pursue)/i,
+    /(just|recently) (graduated|started learning|finished a bootcamp|got a degree)/i,
+    /\b(internship|intern\b)/i,
+    /\bhiring me\b/i,
+    /(what'?s?|what is) the (best|fastest|quickest) way to (become|get into|learn)/i,
+    // Young / teenage self-descriptions — not a buyer, not a decision-maker
+    /\b(cto|founder|engineer|developer)\s+at\s+(age\s+)?\d{1,2}\b/i,
+    /\bat\s+(age\s+)?\d{1,2}\s+(i|you|we)\s+(started|built|coded|learned|launched|made)/i,
+  ];
+  for (const pattern of jobSeekerPatterns) {
+    if (pattern.test(tweet.text)) {
+      return { pass: false, reason: 'Job seeker / career-advice tweet (not a decision-maker)' };
+    }
+  }
+
+  return { pass: true };
+}
+
+/**
+ * Quick keyword-based topic disqualifier — runs BEFORE AI evaluation to save tokens.
+ * Rejects tweets that are clearly off-topic for a software engineering / tech leadership ICP.
+ */
+function passesTopicFilter(
+  tweet: TwitterSearchResult,
+  icpProfile: ICPProfile
+): { pass: boolean; reason?: string } {
+  const text = (tweet.text + ' ' + (tweet.author?.description || '')).toLowerCase();
+
+  // Hard industry/topic disqualifiers — never relevant to this ICP
+  const hardDisqualifiers: Array<[RegExp, string]> = [
+    [/\b(bitcoin|ethereum|solana|cryptocurrency|defi|nft|web3|blockchain wallet|token launch|crypto trading)\b/i, 'Crypto/web3 content'],
+    [/\b(forex|fx trading|stock picks|options trading|day trading|trade signals)\b/i, 'Finance trading content'],
+    [/\b(electric vehicle|ev launch|car (reveal|launch|recall)|automobile industry|volkswagen|scout motors)\b/i, 'Automotive content'],
+    [/\b(military|defense contract|pentagon|nato|weapon system|armament)\b/i, 'Military/defense content'],
+    [/\b(fashion brand|apparel|clothing line|skincare routine|makeup|beauty brand)\b/i, 'Fashion/beauty content'],
+    [/\b(real estate deal|mortgage rate|property flipping|flip houses)\b/i, 'Real estate content'],
+  ];
+
+  for (const [pattern, reason] of hardDisqualifiers) {
+    if (pattern.test(text)) {
+      return { pass: false, reason: `Off-topic: ${reason}` };
+    }
+  }
+
   return { pass: true };
 }
 
@@ -508,31 +570,50 @@ async function evaluateTweetRelevance(
   icpProfile: ICPProfile,
   intent: string
 ): Promise<EngagementCandidate> {
-  const prompt = `Evaluate if this tweet is from our Ideal Customer Profile (ICP).
+  const prompt = `You are a strict ICP evaluator for a fractional CTO / software engineering consultancy.
 
 IMPORTANT: Output ONLY valid JSON. No explanations, no markdown, no code blocks, no text before or after. Do NOT use <think> tags. Just the raw JSON object.
 
-## Our Target ICP:
-Roles: ${icpProfile.targetAudience.roles.join(', ')}
-Industries: ${icpProfile.targetAudience.industries.join(', ')}
+## Our ICP (Ideal Customer Profile):
+Target Roles: ${icpProfile.targetAudience.roles.join(', ')}
+Target Industries: ${icpProfile.targetAudience.industries.join(', ')}
 Company Size: ${icpProfile.targetAudience.companySize.join(', ')}
-Pain Points: ${icpProfile.painPoints.map(p => p.problem).join('; ')}
+Pain Points we solve: ${icpProfile.painPoints.map(p => p.problem).join('; ')}
+Topics of interest: ${icpProfile.topicsOfInterest.slice(0, 6).join(', ')}
 
 ## Tweet to Evaluate:
 Author: @${tweet.author?.username}
 Followers: ${tweet.author?.followersCount}
-Bio: ${tweet.author?.description || 'No bio'}
+Bio: "${tweet.author?.description || 'No bio'}"
 Tweet: "${tweet.text}"
 Metrics: ${tweet.metrics.likes} likes, ${tweet.metrics.replies} replies, ${tweet.metrics.retweets} RTs
 
-## Scoring Guide:
-RELEVANCE (0-10): 8-10 perfect ICP match, 5-7 good match, 3-4 weak, 0-2 not ICP
-ENGAGEMENT POTENTIAL (0-10): 8-10 asking for help, 5-7 discussing topic, 3-4 venting, 0-2 spam
+## STRICT Scoring — DO NOT default to 5/6. Every score must reflect the actual content:
 
-Score generously - if they discuss problems our ICP has, they're worth engaging.
+RELEVANCE (0-10):
+- 9-10: Author IS the target role (CTO, VP Eng, Founder, Eng Director) AND expresses a direct pain point we solve (hiring engineers, shipping delays, agency failures, technical leadership gaps, scaling challenges)
+- 7-8: Strong ICP signals — discussing team building, product engineering, dev costs, technical debt, or startup scaling challenges; plausible decision-maker
+- 5-6: Moderate signal — general tech/startup content from someone who COULD be ICP, but no clear pain expression
+- 3-4: Weak / tangential — discussing adjacent topics (general business, adjacent industry) with no engineering leadership signal
+- 0-2: NOT ICP — wrong industry entirely, job seeker, student, news aggregator, crypto, automotive, defense, or unrelated content
+
+ENGAGEMENT POTENTIAL (0-10):
+- 9-10: Explicitly expressing pain, frustration, or asking for help with a problem we can solve
+- 7-8: Sharing a relevant challenge or experience, inviting conversation
+- 5-6: Discussing topic thoughtfully, might welcome a relevant reply
+- 3-4: Sharing opinion without a need signal, not obviously seeking input
+- 0-2: Promotional, spam, just sharing news headlines, bot-like
+
+AUTO-SCORE 0-2 on relevance if the person:
+- Is a job seeker asking what skills to learn or how to get hired
+- Is a student or intern
+- Is discussing crypto, finance, EVs, defense, or unrelated industries
+- Bio shows no decision-making role (just a learner/follower account)
+
+IMPORTANT: Score 8+ only if the tweet clearly matches our ICP. Score 3 or below if it's a poor match. Avoid the middle ground unless truly uncertain.
 
 Output this exact JSON structure:
-{"relevanceScore": 5, "engagementPotential": 6, "reasons": ["reason1", "reason2"], "replyAngle": "what value we can add"}`;
+{"relevanceScore": 0, "engagementPotential": 0, "reasons": ["specific reason based on tweet content"], "replyAngle": "what unique value we can add to this specific tweet"}`;
 
   try {
     const response = await createChatCompletion({
@@ -591,17 +672,36 @@ async function generateReply(
   icpProfile: ICPProfile
 ): Promise<string | null> {
   // Select a reply formula randomly for variety
-  const replyFormulas = [
-    'CONTRARIAN - Respectfully add nuance or a different perspective',
-    'STORY - Share a brief personal experience that relates',
-    'DATA - Add a specific stat, number, or data point',
-    'QUESTION - Ask a thought-provoking follow-up question',
-    'FRAMEWORK - Share a mental model or framework briefly',
-    'MISTAKE - Share a mistake you made related to this',
-    'CURIOSITY - Tease deeper insight without fully explaining',
+  // Psychographic formulas (EMPATHY, COST_OF_INACTION, DOLLARIZE) are weighted heavier
+  // because they convert at higher rates — they speak to fears and hunger, not just info
+  // Each entry: [logLabel, approachDescription]
+  // The approachDescription is what goes into the prompt — no category name so the model
+  // can't leak it into the reply as a prefix ("MISTAKE: ...").
+  const replyFormulas: [string, string][] = [
+    ['CONTRARIAN',        'Respectfully add nuance or a different perspective on what they said'],
+    ['STORY',             'Share a brief specific personal experience (1-2 sentences) that relates to their situation'],
+    ['DATA',              'Back up your point with a specific stat, number, or concrete data point'],
+    ['QUESTION',          'Ask one sharp, thought-provoking follow-up question that shows you\'ve actually read their tweet'],
+    ['FRAMEWORK',         'Share a concise mental model or 2-step framework that reframes their problem'],
+    ['MISTAKE',           'Share a specific mistake you once made that\'s directly relevant — what went wrong and what you learned'],
+    ['CURIOSITY',         'Tease a deeper, counterintuitive insight without fully explaining it, leaving them wanting more'],
+    // Psychographic formulas from Chris Do ICP framework — weighted 2-3x for higher conversion
+    ['EMPATHY',           'Acknowledge the specific frustration they\'ve experienced with bad vendors or failed approaches — show you genuinely understand what they\'ve been through, no pitch'],
+    ['EMPATHY',           'Acknowledge the specific frustration they\'ve experienced with bad vendors or failed approaches — show you genuinely understand what they\'ve been through, no pitch'],
+    ['COST_OF_INACTION',  'Help them feel the compounding cost of NOT solving this now — make the pain of waiting feel concrete and real, not theoretical'],
+    ['DOLLARIZE',         'Frame your insight in their own financial or business terms — translate the pain into time lost, revenue missed, or budget wasted'],
   ];
   
-  const selectedFormula = replyFormulas[Math.floor(Math.random() * replyFormulas.length)];
+  const [formulaLabel, formulaApproach] = replyFormulas[Math.floor(Math.random() * replyFormulas.length)];
+
+  // Build psychographic context block for the system prompt
+  const psychoContext = [
+    icpProfile.psychographics ? `Their values: ${icpProfile.psychographics.values}` : '',
+    icpProfile.psychographics ? `Their core fear: ${icpProfile.psychographics.fears}` : '',
+    icpProfile.psychographics ? `Their spending logic: ${icpProfile.psychographics.spendingLogic}` : '',
+    icpProfile.theHunger ? `What they HUNGER for: ${icpProfile.theHunger}` : '',
+    icpProfile.theCrapTheyDealWith ? `Vendor baggage (what burned them before): ${icpProfile.theCrapTheyDealWith}` : '',
+  ].filter(Boolean).join('\n');
   
   const systemPrompt = `You write Twitter replies that make people click your profile. Return ONLY the reply text. No quotes, no explanations, no meta-commentary. No <think> tags. Just the reply.
 
@@ -610,44 +710,54 @@ Tone: ${icpProfile.engagementStyle.tone}
 Do: ${icpProfile.engagementStyle.doThis.join('; ')}
 Don't: ${icpProfile.engagementStyle.avoidThis.join('; ')}
 
+## PSYCHOGRAPHIC CONTEXT (use this to make your reply feel PERSONAL, not generic):
+${psychoContext || 'Use your best judgment based on the tweet content.'}
+
 RULES:
+- NEVER start your reply with a label, category, or keyword like "MISTAKE:", "STORY:", "DATA:", "EMPATHY:" etc. — write the reply directly
+- NEVER start with "Agreed", "Agree,", "Agree.", "True,", "Exactly," or any agreement word — it sounds sycophantic and lazy
 - NO sycophantic openers ("Great point!", "Love this!", "So true!")
-- NO self-promotion, links, or hashtags
-- NO emojis unless they used them
-- NO generic advice anyone could give
-- MAXIMUM 280 characters (aim for 200-250)
-- Be SPECIFIC to their tweet content
-- Sound like a real person, not a bot
+- NO self-promotion, links, or hashtags (no # symbols)
+- NO emojis unless they used them first
+- NO generic advice anyone could give — be specific to THIS tweet
+- MAXIMUM 280 characters (aim for 180-240)
+- Sound like a real person talking to another person, not a consultant closing a deal
+- NO salesy closers ("Curious how I can help?", "Let's solve this together", "Want to chat?", "Can you afford to wait?")
+- End with either a sharp observation, a specific data point, or a single well-formed question — not a pitch
+- NEVER invent first-person statistics, team sizes, client counts, or personal experiences — do NOT write things like "my team averaged X hrs/week" or "I helped a client cut time by X%" — you cannot fabricate data
+- NEVER copy phrases from the psychographic context verbatim into the reply — use the context to inform your TONE and ANGLE, not as text to paste
 
-FORMULA TO USE: ${selectedFormula}`;
+APPROACH: ${formulaApproach}`;
 
-  const userPrompt = `Write a reply using the ${selectedFormula} formula.
+  const userPrompt = `Reply to this tweet.
 
 Tweet from @${tweet.author?.username}:
 "${tweet.text}"
 
 Their bio: ${tweet.author?.description || 'No bio available'}
-Their followers: ${tweet.author?.followersCount}
 
-Remember:
-- Use the ${selectedFormula} approach
-- Be specific to their tweet (don't give generic advice)
-- Leave them curious about you
-- Sound human, not like a bot
-- Under 280 chars (aim for 200-250)
+${icpProfile.theHunger ? `Their likely hunger: ${icpProfile.theHunger}` : ''}
+${icpProfile.theCrapTheyDealWith ? `What burned them before: ${icpProfile.theCrapTheyDealWith}` : ''}
 
-Generate ONLY the reply text. No quotes, no explanation.`;
+Your approach: ${formulaApproach}
+
+Rules:
+- Start directly with the content — no label prefix
+- Be specific to THEIR tweet, not generic
+- No hashtags, no links, no salesy closers
+- Under 240 chars
+- Reply text only — no quotes, no explanation`;
 
   try {
-    console.log(`[Reply Generator] Generating reply for @${tweet.author?.username} using ${selectedFormula} formula...`);
+    console.log(`[Reply Generator] Generating reply for @${tweet.author?.username} using ${formulaLabel} formula...`);
     const response = await createChatCompletion({
       messages: [
         { role: 'system', content: systemPrompt },
         { role: 'user', content: userPrompt },
       ],
       temperature: 0.85, // Slightly higher for more creative replies
-      maxTokens: 150,
-      preferFast: false, // Use quality model for reply generation
+      maxTokens: 400,      // 400 allows reasoning models to think + produce the reply; 150 was too tight
+      preferFast: false,   // Use quality model for reply generation
     });
 
     const reply = response.content?.trim();
@@ -673,13 +783,41 @@ Generate ONLY the reply text. No quotes, no explanation.`;
       /link in bio/i,
       /DM me/i,
       /https?:\/\//i,
+
+      // Hashtags — any # symbol means the model added a hashtag
+      /#\w+/,
+
+      // Literal placeholders — model left a template variable unfilled
+      /\$[A-Z]\b/,          // $X, $Y, $Z
+      /\[X\]|\[N\]|\[number\]|\[amount\]|\[value\]/i,
+      /\bX%|X hours|X months|X days\b/i,
       
       // Generic bot-like responses
       /^(hey|hi|hello)\s+@/i,
       /thanks for sharing/i,
       /great question/i,
       /^(agree|agreed|100%|this|same)$/i,
+
+      // Agreement word as an opener ("Agreed. ...", "Agree, ...", "True, ...", "Exactly, ...")
+      /^(agreed?|true|exactly|totally|absolutely|right|yep|yup|yes)[.,!]?\s/i,
+
+      // Formula name leaking as a prefix
+      /^(MISTAKE|STORY|DATA|QUESTION|FRAMEWORK|EMPATHY|COST_OF_INACTION|DOLLARIZE|CONTRARIAN|CURIOSITY):/i,
+
+      // Fabricated first-person stats / invented experiences — brand risk
+      /my team (and i |)?averaged/i,
+      /i helped (a |one |\d+ )?client(s)? (cut|reduce|save|increase|improve)/i,
+      /we helped (a |one |\d+ )?client(s)?/i,
+      /(150|200|300)\+?\s*hrs?\/?(week|month)/i,
       
+      // Salesy closers that sound like a pitch, not a reply
+      /curious how (i|we) can help/i,
+      /let'?s (avoid|fix|solve|tackle|chat|connect|talk|discuss) (this|that|it) together/i,
+      /can you afford to (wait|ignore|miss)/i,
+      /want to (chat|connect|talk|hop on a call|learn more)/i,
+      /(reach|message|contact) (me|us)/i,
+      /let me (show|help|know if)/i,
+
       // Corporate speak
       /leverage/i,
       /synergy/i,
@@ -794,11 +932,24 @@ ORIGINAL TWEET: "${originalTweet}"
 AUTHOR BIO: "${authorBio}"
 REPLY TO EVALUATE: "${reply}"
 
-Score 1-10 each: specificity, valueAdd, conversationStarter, authenticity, profileClickPotential.
-RED FLAGS (auto fail): sycophantic praise, generic advice, self-promotional, buzzwords.
+Score each dimension 1-10. DO NOT default to 5. Score what you actually see.
 
-Output this exact JSON structure:
-{"scores": {"specificity": 5, "valueAdd": 5, "conversationStarter": 5, "authenticity": 5, "profileClickPotential": 5}, "overallScore": 5, "issues": [], "passesQuality": true}`;
+SCORING GUIDE:
+- specificity (1-10): Does it reference specific details from THIS tweet, or is it generic enough to post under any tweet? Generic = 1-3.
+- valueAdd (1-10): Does it teach, reframe, or add a concrete insight? Vague observation = 1-3. Sharp data/framework/story = 8-10.
+- conversationStarter (1-10): Does it make the author want to reply? Generic "how do you...?" questions = 2. Unexpected angle or pointed question = 8-10.
+- authenticity (1-10): Does it sound like a real person or a bot? Starting with "Agreed", "Great", or agreement words = 1-2. Fabricated stats = 1.
+- profileClickPotential (1-10): Would this make someone curious enough to click the replier's profile? Empty question = 1-2. Insightful observation = 8-10.
+
+AUTO-FAIL (set passesQuality: false) if the reply:
+- Starts with "Agreed", "Agree", "True", "Exactly" or any agreement word
+- Is a generic question that could be asked under any tweet on any topic
+- Contains fabricated personal stats ("my team averaged X hrs", "I helped a client...")
+- Has zero specificity to the original tweet content
+- Is under 50 characters
+
+Output this exact JSON structure (no placeholder values — use your actual scores):
+{"scores": {"specificity": 0, "valueAdd": 0, "conversationStarter": 0, "authenticity": 0, "profileClickPotential": 0}, "overallScore": 0, "issues": ["specific issue"], "passesQuality": false}`;
 
   try {
     const response = await createChatCompletion({
@@ -816,10 +967,19 @@ Output this exact JSON structure:
     const jsonMatch = content.match(/\{[\s\S]*\}/);
     if (jsonMatch) {
       const result = JSON.parse(jsonMatch[0]);
+      // Clamp score to valid 0-10 range — some models return out-of-range values (e.g. 39)
+      // If overallScore is missing or out of range, derive it from sub-scores
+      let rawScore = result.overallScore;
+      if (typeof rawScore !== 'number' || rawScore > 10 || rawScore < 0) {
+        const sub = result.scores || {};
+        const vals = Object.values(sub).filter((v): v is number => typeof v === 'number');
+        rawScore = vals.length > 0 ? vals.reduce((a: number, b: number) => a + b, 0) / vals.length : 5;
+      }
+      const score = Math.min(10, Math.max(0, rawScore));
       return {
-        score: result.overallScore || 5,
+        score,
         issues: result.issues || [],
-        passesQuality: result.passesQuality ?? (result.overallScore >= 5),
+        passesQuality: result.passesQuality ?? (score >= 6),
       };
     }
   } catch (error) {
